@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -22,23 +23,31 @@ class DatabaseService {
 
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
-      CREATE TABLE children(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT,
-        stars INTEGER DEFAULT 0
-      )
-    ''');
+    CREATE TABLE children(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      stars INTEGER DEFAULT 0
+    )
+  ''');
 
     await db.execute('''
-      CREATE TABLE tasks(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        childId INTEGER,
-        title TEXT,
-        isCompleted INTEGER DEFAULT 0,
-        starAwarded INTEGER DEFAULT 0,
-        date TEXT
-      )
-    ''');
+    CREATE TABLE task_templates(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      childId INTEGER,
+      title TEXT
+    )
+  ''');
+
+    await db.execute('''
+    CREATE TABLE tasks(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      childId INTEGER,
+      title TEXT,
+      isCompleted INTEGER DEFAULT 0,
+      starAwarded INTEGER DEFAULT 0,
+      date TEXT
+    )
+  ''');
   }
 
   // =========================
@@ -69,13 +78,27 @@ class DatabaseService {
     final db = await database;
     final today = DateTime.now().toIso8601String().substring(0, 10);
 
-    return await db.insert('tasks', {
+    // Insert today's task
+    int taskId = await db.insert('tasks', {
       'childId': childId,
       'title': title,
       'isCompleted': 0,
-      'starAwarded': 0, // <-- REQUIRED
+      'starAwarded': 0,
       'date': today,
     });
+
+    // Check if template already exists
+    final existing = await db.query(
+      'task_templates',
+      where: 'childId = ? AND title = ?',
+      whereArgs: [childId, title],
+    );
+
+    if (existing.isEmpty) {
+      await db.insert('task_templates', {'childId': childId, 'title': title});
+    }
+
+    return taskId;
   }
 
   Future<List<Map<String, dynamic>>> getTasksForChild(int childId) async {
@@ -117,11 +140,84 @@ class DatabaseService {
     await db.delete('tasks', where: 'date != ?', whereArgs: [today]);
   }
 
+  Future<void> dailyResetIfNeeded() async {
+    final db = await database;
+
+    final prefs = await SharedPreferences.getInstance();
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final lastReset = prefs.getString('last_reset_date');
+
+    if (lastReset != today) {
+      await db.delete('tasks');
+      await prefs.setString('last_reset_date', today);
+    }
+  }
+
   Future<void> clearDatabase() async {
     final db = await database;
 
     await db.delete('tasks');
     await db.delete('children');
     await db.delete('rewards');
+  }
+
+  Future<void> checkAndResetDaily() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final lastReset = prefs.getString('lastResetDate');
+
+    if (lastReset != today) {
+      final db = await database;
+
+      // Delete old tasks
+      await db.delete('tasks', where: 'date != ?', whereArgs: [today]);
+
+      // Save today's date
+      await prefs.setString('lastResetDate', today);
+    }
+  }
+
+  Future<void> generateDailyTasksIfNeeded(int childId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+
+    final key = 'lastGenerated_$childId';
+    final lastGenerated = prefs.getString(key);
+
+    if (lastGenerated == today) return;
+
+    final db = await database;
+
+    // Get templates
+    final templates = await db.query(
+      'task_templates',
+      where: 'childId = ?',
+      whereArgs: [childId],
+    );
+
+    for (var template in templates) {
+      await db.insert('tasks', {
+        'childId': childId,
+        'title': template['title'],
+        'isCompleted': 0,
+        'starAwarded': 0,
+        'date': today,
+      });
+    }
+
+    await prefs.setString(key, today);
+  }
+
+  Future<List<String>> getTaskSuggestions(int childId) async {
+    final db = await database;
+
+    final result = await db.query(
+      'task_templates',
+      where: 'childId = ?',
+      whereArgs: [childId],
+    );
+
+    return result.map((e) => e['title'] as String).toList();
   }
 }

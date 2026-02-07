@@ -19,11 +19,23 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
     _loadTasks();
   }
 
+  bool _initialized = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    child = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
-    _loadTasks();
+
+    if (!_initialized) {
+      child =
+          ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+      _initializeTasks();
+      _initialized = true;
+    }
+  }
+
+  Future<void> _initializeTasks() async {
+    await _db.generateDailyTasksIfNeeded(child['id']);
+    await _loadTasks();
   }
 
   Future<void> _loadTasks() async {
@@ -35,14 +47,32 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
 
   Future<void> addTask() async {
     TextEditingController controller = TextEditingController();
+    final suggestions = await _db.getTaskSuggestions(child['id']);
 
     await showDialog(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("Add Task"),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(hintText: "Enter task name"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(hintText: "Enter task name"),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              children: suggestions.map((taskTitle) {
+                return ActionChip(
+                  label: Text(taskTitle),
+                  onPressed: () {
+                    controller.text = taskTitle;
+                  },
+                );
+              }).toList(),
+            ),
+          ],
         ),
         actions: [
           TextButton(

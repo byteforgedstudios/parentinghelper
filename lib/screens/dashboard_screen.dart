@@ -22,7 +22,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> initialize() async {
-    await _db.clearOldTasks();
+    await _db.checkAndResetDaily();
     loadData();
   }
 
@@ -58,7 +58,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             backgroundColor: Colors.red,
             onPressed: () async {
               await _db.clearDatabase();
-              setState(() {});
+              await loadData();
             },
             child: const Icon(Icons.delete),
           ),
@@ -67,7 +67,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             heroTag: "addChild",
             onPressed: () async {
               await Navigator.pushNamed(context, '/addChild');
-              loadData();
+              await loadData();
             },
             child: const Icon(Icons.add),
           ),
