@@ -1,0 +1,2 @@
+const int FREE_MAX_CHILDREN = 1;
+const int FREE_MAX_TASKS_PER_CHILD = 5;
