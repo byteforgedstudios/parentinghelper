@@ -47,32 +47,45 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
 
   Future<void> addTask() async {
     TextEditingController controller = TextEditingController();
-    final suggestions = await _db.getTaskSuggestions(child['id']);
+
+    final suggestions = await _db.getTaskTemplatesForChild(child['id']);
 
     await showDialog(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("Add Task"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(hintText: "Enter task name"),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              children: suggestions.map((taskTitle) {
-                return ActionChip(
-                  label: Text(taskTitle),
-                  onPressed: () {
-                    controller.text = taskTitle;
-                  },
-                );
-              }).toList(),
-            ),
-          ],
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller,
+                decoration: const InputDecoration(hintText: "Enter task name"),
+              ),
+              const SizedBox(height: 16),
+              if (suggestions.isNotEmpty) ...[
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    "Suggested Tasks:",
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: suggestions.map((title) {
+                    return ActionChip(
+                      label: Text(title),
+                      onPressed: () {
+                        controller.text = title;
+                      },
+                    );
+                  }).toList(),
+                ),
+              ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -84,6 +97,7 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
               if (controller.text.trim().isEmpty) return;
 
               await _db.insertTask(child['id'], controller.text.trim());
+              if (!mounted) return;
 
               Navigator.pop(context);
               _loadTasks();

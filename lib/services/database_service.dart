@@ -48,6 +48,16 @@ class DatabaseService {
       date TEXT
     )
   ''');
+
+    await db.execute('''
+    CREATE TABLE rewards(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      childId INTEGER,
+      title TEXT,
+      cost INTEGER,
+      isRedeemed INTEGER DEFAULT 0
+    )
+  ''');
   }
 
   // =========================
@@ -209,6 +219,18 @@ class DatabaseService {
     await prefs.setString(key, today);
   }
 
+  Future<List<String>> getTaskTemplatesForChild(int childId) async {
+    final db = await database;
+
+    final results = await db.query(
+      'task_templates',
+      where: 'childId = ?',
+      whereArgs: [childId],
+    );
+
+    return results.map((e) => e['title'] as String).toList();
+  }
+
   Future<List<String>> getTaskSuggestions(int childId) async {
     final db = await database;
 
@@ -220,4 +242,63 @@ class DatabaseService {
 
     return result.map((e) => e['title'] as String).toList();
   }
+
+  // =========================
+  // REWARDS METHODS
+  // =========================
+
+  Future<void> insertReward(int childId, String title, int cost) async {
+    final db = await database;
+
+    await db.insert('rewards', {
+      'childId': childId,
+      'title': title,
+      'cost': cost,
+      'isRedeemed': 0,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getRewardsForChild(int childId) async {
+    final db = await database;
+
+    return await db.query(
+      'rewards',
+      where: 'childId = ?',
+      whereArgs: [childId],
+    );
+  }
+
+  Future<bool> redeemReward(Map<String, dynamic> reward) async {
+    final db = await database;
+
+    // Get current stars
+    final child = await db.query(
+      'children',
+      where: 'id = ?',
+      whereArgs: [reward['childId']],
+    );
+
+    int currentStars = (child.first['stars'] as int?) ?? 0;
+
+    if (currentStars < reward['cost']) {
+      return false; // Not enough stars
+    }
+
+    // Deduct stars
+    await db.rawUpdate(
+      'UPDATE children SET stars = stars - ? WHERE id = ?',
+      [reward['cost'], reward['childId']],
+    );
+
+    // Mark reward redeemed
+    await db.update(
+      'rewards',
+      {'isRedeemed': 1},
+      where: 'id = ?',
+      whereArgs: [reward['id']],
+    );
+
+    return true;
+  }
+
 }
