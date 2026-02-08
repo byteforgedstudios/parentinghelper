@@ -55,7 +55,15 @@ class DatabaseService {
       childId INTEGER,
       title TEXT,
       cost INTEGER,
-      isRedeemed INTEGER DEFAULT 0
+    )
+  ''');
+
+    await db.execute('''
+    CREATE TABLE reward_history(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      childId INTEGER,
+      rewardId INTEGER,
+      date TEXT
     )
   ''');
   }
@@ -268,37 +276,36 @@ class DatabaseService {
     );
   }
 
-  Future<bool> redeemReward(Map<String, dynamic> reward) async {
+  Future<bool> redeemReward(int childId, int rewardId, int cost) async {
     final db = await database;
 
-    // Get current stars
     final child = await db.query(
       'children',
       where: 'id = ?',
-      whereArgs: [reward['childId']],
+      whereArgs: [childId],
     );
 
-    int currentStars = (child.first['stars'] as int?) ?? 0;
+    if (child.isEmpty) return false;
 
-    if (currentStars < reward['cost']) {
+    int currentStars = child.first['stars'] as int;
+
+    if (currentStars < cost) {
       return false; // Not enough stars
     }
 
     // Deduct stars
-    await db.rawUpdate(
-      'UPDATE children SET stars = stars - ? WHERE id = ?',
-      [reward['cost'], reward['childId']],
-    );
+    await db.rawUpdate('UPDATE children SET stars = stars - ? WHERE id = ?', [
+      cost,
+      childId,
+    ]);
 
-    // Mark reward redeemed
-    await db.update(
-      'rewards',
-      {'isRedeemed': 1},
-      where: 'id = ?',
-      whereArgs: [reward['id']],
-    );
+    // Log redemption
+    await db.insert('reward_history', {
+      'childId': childId,
+      'rewardId': rewardId,
+      'date': DateTime.now().toIso8601String(),
+    });
 
     return true;
   }
-
 }

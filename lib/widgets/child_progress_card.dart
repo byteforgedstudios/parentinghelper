@@ -6,6 +6,7 @@ class ChildProgressCard extends StatelessWidget {
   final int total;
   final int stars;
   final VoidCallback? onTap;
+  final VoidCallback onRewardsTap;
 
   const ChildProgressCard({
     super.key,
@@ -13,7 +14,8 @@ class ChildProgressCard extends StatelessWidget {
     required this.completed,
     required this.total,
     required this.stars,
-    this.onTap,
+    required this.onTap,
+    required this.onRewardsTap,
   });
 
   @override
@@ -29,14 +31,22 @@ class ChildProgressCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(name,
-                  style: const TextStyle(
-                      fontSize: 20, fontWeight: FontWeight.bold)),
+              Text(
+                name,
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 8),
               LinearProgressIndicator(value: progress),
               const SizedBox(height: 8),
               Text("$completed / $total tasks completed"),
               Text("⭐ Stars: $stars"),
+              IconButton(
+                icon: const Icon(Icons.card_giftcard),
+                onPressed: onRewardsTap,
+              ),
             ],
           ),
         ),

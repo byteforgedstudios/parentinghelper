@@ -97,6 +97,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                     loadData(); // refresh dashboard when returning
                   },
+                  onRewardsTap: () async {
+                    await Navigator.pushNamed(
+                      context,
+                      '/rewards',
+                      arguments: child,
+                    );
+                    await loadData(); // refresh stars after redeem
+                  },
                 );
               },
             ),
