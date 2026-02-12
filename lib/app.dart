@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:parentinghelper/screens/add_reward_screen.dart';
 import 'package:parentinghelper/screens/rewards_screen.dart';
+import 'package:parentinghelper/screens/reward_history_screen.dart';
 import 'screens/splash_screen.dart';
 import 'screens/add_child_screen.dart';
 import 'screens/task_checklist_screen.dart';
@@ -37,6 +38,7 @@ class ParentingHelperApp extends StatelessWidget {
         '/tasks': (context) => const TaskChecklistScreen(),
         '/rewards': (context) => const RewardsScreen(),
         '/addReward': (context) => const AddRewardScreen(),
+        '/rewardHistory': (context) => const RewardHistoryScreen(),
       },
     );
   }

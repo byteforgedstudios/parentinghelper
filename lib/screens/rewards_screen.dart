@@ -44,12 +44,10 @@ class _RewardsScreenState extends State<RewardsScreen> {
 
     if (!mounted) return;
 
-    print("Stars before redeem: $stars");
     if (success) {
       setState(() {
         stars -= cost;
       });
-      print("Stars after redeem: $stars");
 
       ScaffoldMessenger.of(
         context,
@@ -73,7 +71,17 @@ class _RewardsScreenState extends State<RewardsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("${child['name']}'s Rewards")),
+      appBar: AppBar(
+        title: Text("${child['name']}'s Rewards"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.history),
+            onPressed: () {
+              Navigator.pushNamed(context, '/rewardHistory', arguments: child);
+            },
+          ),
+        ],
+      ),
 
       floatingActionButton: FloatingActionButton(
         onPressed: () async {

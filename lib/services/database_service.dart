@@ -316,4 +316,24 @@ class DatabaseService {
 
     return true;
   }
+
+  Future<List<Map<String, dynamic>>> getRewardHistory(int childId) async {
+    final db = await database;
+
+    return await db.rawQuery(
+      '''
+    SELECT rh.id, rh.date, r.title, r.cost
+    FROM reward_history rh
+    JOIN rewards r ON rh.rewardId = r.id
+    WHERE rh.childId = ?
+    ORDER BY rh.date DESC
+  ''',
+      [childId],
+    );
+  }
+
+  Future<void> deleteHistoryEntry(int historyId) async {
+    final db = await database;
+    await db.delete('reward_history', where: 'id = ?', whereArgs: [historyId]);
+  }
 }
