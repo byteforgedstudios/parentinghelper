@@ -32,11 +32,10 @@ class _RewardsScreenState extends State<RewardsScreen> {
   }
 
   Future<void> loadStars() async {
-    final children = await _db.getChildren();
-    final updatedChild = children.firstWhere((c) => c['id'] == child['id']);
+    final dbChild = await _db.getChildById(child['id']);
 
     setState(() {
-      stars = updatedChild['stars'] ?? 0;
+      stars = dbChild['stars'] as int;
     });
   }
 
@@ -45,7 +44,13 @@ class _RewardsScreenState extends State<RewardsScreen> {
 
     if (!mounted) return;
 
+    print("Stars before redeem: $stars");
     if (success) {
+      setState(() {
+        stars -= cost;
+      });
+      print("Stars after redeem: $stars");
+
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("Reward redeemed! 🎉")));
@@ -69,6 +74,17 @@ class _RewardsScreenState extends State<RewardsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text("${child['name']}'s Rewards")),
+
+      floatingActionButton: FloatingActionButton(
+        onPressed: () async {
+          await Navigator.pushNamed(context, '/addReward', arguments: child);
+
+          if (!mounted) return;
+          loadRewards(); // refresh after adding
+        },
+        child: const Icon(Icons.add),
+      ),
+
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(

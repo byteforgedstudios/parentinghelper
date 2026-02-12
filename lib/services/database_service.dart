@@ -54,7 +54,7 @@ class DatabaseService {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       childId INTEGER,
       title TEXT,
-      cost INTEGER,
+      cost INTEGER
     )
   ''');
 
@@ -80,6 +80,14 @@ class DatabaseService {
   Future<List<Map<String, dynamic>>> getChildren() async {
     final db = await database;
     return await db.query('children');
+  }
+
+  Future<Map<String, dynamic>> getChildById(int id) async {
+    final db = await database;
+
+    final result = await db.query('children', where: 'id = ?', whereArgs: [id]);
+
+    return result.first;
   }
 
   Future<void> deleteChild(int id) async {
@@ -177,6 +185,7 @@ class DatabaseService {
     await db.delete('tasks');
     await db.delete('children');
     await db.delete('rewards');
+    await db.delete('reward_history');
   }
 
   Future<void> checkAndResetDaily() async {
@@ -262,7 +271,6 @@ class DatabaseService {
       'childId': childId,
       'title': title,
       'cost': cost,
-      'isRedeemed': 0,
     });
   }
 
