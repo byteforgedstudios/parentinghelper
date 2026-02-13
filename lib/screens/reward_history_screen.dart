@@ -87,14 +87,25 @@ class _RewardHistoryScreenState extends State<RewardHistoryScreen> {
       body: Column(
         children: [
           Container(
-            padding: const EdgeInsets.all(16),
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.deepPurple,
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Column(
               children: [
+                const Text(
+                  "Total Stars Spent",
+                  style: TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 8),
                 Text(
-                  "Total Stars Spent: $totalSpent ⭐",
+                  "$totalSpent ⭐",
                   style: const TextStyle(
-                    fontSize: 18,
+                    fontSize: 26,
                     fontWeight: FontWeight.bold,
+                    color: Colors.white,
                   ),
                 ),
               ],

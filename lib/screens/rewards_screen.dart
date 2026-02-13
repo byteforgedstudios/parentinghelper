@@ -97,12 +97,38 @@ class _RewardsScreenState extends State<RewardsScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            const Icon(Icons.star, size: 64, color: Colors.amber),
-            const SizedBox(height: 12),
-            Text(
-              'Stars available: $stars',
-              style: const TextStyle(fontSize: 18),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: Column(
+                children: [
+                  const Icon(Icons.star_rounded, size: 50, color: Colors.white),
+                  const SizedBox(height: 12),
+                  const Text(
+                    "Stars Available",
+                    style: TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    "$stars",
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
             ),
+
             const SizedBox(height: 30),
 
             Expanded(
@@ -123,16 +149,57 @@ class _RewardsScreenState extends State<RewardsScreen> {
   }
 
   Widget rewardTile(Map<String, dynamic> reward) {
-    return Card(
-      child: ListTile(
-        title: Text(reward['title']),
-        subtitle: Text("Cost: ${reward['cost']} ⭐"),
-        trailing: ElevatedButton(
-          onPressed: () => redeem(
-            reward['id'], // rewardId
-            reward['cost'], // cost
+    final int cost = reward['cost'];
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Card(
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 12,
           ),
-          child: const Text("Redeem"),
+          leading: const CircleAvatar(
+            backgroundColor: Colors.amber,
+            child: Icon(Icons.card_giftcard, color: Colors.white),
+          ),
+          title: Text(
+            reward['title'],
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          subtitle: Text("$cost ⭐"),
+          trailing: ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: stars >= cost ? Colors.deepPurple : Colors.grey,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text("Confirm Redemption"),
+                  content: Text("Redeem ${reward['title']} for $cost stars?"),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text("Cancel"),
+                    ),
+                    ElevatedButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text("Redeem"),
+                    ),
+                  ],
+                ),
+              );
+
+              if (confirm == true) {
+                redeem(reward['id'], cost);
+              }
+            },
+            child: const Text("Redeem"),
+          ),
         ),
       ),
     );

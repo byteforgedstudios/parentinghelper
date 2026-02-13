@@ -15,22 +15,47 @@ class ParentingHelperApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
+
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
+          seedColor: Colors.deepPurple,
           brightness: Brightness.light,
         ),
+
+        scaffoldBackgroundColor: const Color(0xFFF6F8FC),
+
+        appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0),
+
+        cardTheme: CardThemeData(
+          elevation: 3,
+          margin: const EdgeInsets.symmetric(vertical: 8),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+        ),
+
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.deepPurple,
+            foregroundColor: Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
-            padding: const EdgeInsets.symmetric(
-              vertical: 16,
-              horizontal: 24,
-            ),
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
           ),
         ),
-        
+
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: Colors.deepPurple),
+          ),
+        ),
       ),
       home: const SplashScreen(),
       routes: {
