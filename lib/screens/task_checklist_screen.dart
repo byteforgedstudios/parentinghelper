@@ -13,6 +13,7 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
   List<Map<String, dynamic>> tasks = [];
   late Map<String, dynamic> child;
   DateTime selectedDate = DateTime.now();
+  final ScrollController _dayScrollController = ScrollController();
 
   String get formattedDate => selectedDate.toIso8601String().split('T').first;
 
@@ -54,6 +55,11 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
     return names[month];
   }
 
+  String _weekdayShort(int weekday) {
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return days[weekday - 1];
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -72,6 +78,8 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
   }
 
   Future<void> _loadTasks() async {
+    final formattedDate = selectedDate.toIso8601String().split('T').first;
+
     final loadedTasks = await _db.getTasksForChild(child['id'], formattedDate);
 
     setState(() {
@@ -172,114 +180,23 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
         onPressed: addTask,
         child: const Icon(Icons.add),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
+      body: GestureDetector(
+        onHorizontalDragEnd: (details) async {
+          if (details.primaryVelocity == null) return;
+
+          if (details.primaryVelocity! < 0) {
+            // Swipe Left → Next Day
+            await _changeDay(1);
+          } else if (details.primaryVelocity! > 0) {
+            // Swipe Right → Previous Day
+            await _changeDay(-1);
+          }
+        },
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-             Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                gradient: LinearGradient(
-                  colors: [
-                    Theme.of(context).colorScheme.primary,
-                    Theme.of(context).colorScheme.primaryContainer,
-                  ],
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    prettyDate,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      IconButton(
-                        icon: const Icon(
-                          Icons.chevron_left,
-                          color: Colors.white,
-                        ),
-                        onPressed: () async {
-                          setState(() {
-                            selectedDate = selectedDate.subtract(
-                              const Duration(days: 1),
-                            );
-                          });
-                          await _loadTasks();
-                        },
-                      ),
-                      Text(
-                        "Swipe days or tap arrows",
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.chevron_right,
-                          color: Colors.white,
-                        ),
-                        onPressed: () async {
-                          setState(() {
-                            selectedDate = selectedDate.add(
-                              const Duration(days: 1),
-                            );
-                          });
-                          await _loadTasks();
-                        },
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
+            _buildPlannerHeader(),
             const SizedBox(height: 16),
-
-            // Task list
-            Expanded(
-              child: tasks.isEmpty
-                  ? const Center(child: Text("No tasks yet"))
-                  : ListView.builder(
-                      itemCount: tasks.length,
-                      itemBuilder: (context, index) {
-                        final task = tasks[index];
-
-                        return CheckboxListTile(
-                          title: Text(task['title']),
-                          value: task['isCompleted'] == 1,
-                          onChanged: (value) async {
-                            await _db.updateTaskStatus(
-                              task['id'],
-                              value ?? false,
-                            );
-
-                            if ((value ?? false) && task['starAwarded'] == 0) {
-                              await _db.addStars(task['childId'], 1);
-
-                              await _db.database.then((db) async {
-                                await db.update(
-                                  'tasks',
-                                  {'starAwarded': 1},
-                                  where: 'id = ?',
-                                  whereArgs: [task['id']],
-                                );
-                              });
-                            }
-
-                            await _loadTasks();
-                          },
-                        );
-                      },
-                    ),
-            ),
+            Expanded(child: _buildAnimatedTaskList()),
           ],
         ),
       ),
@@ -312,5 +229,139 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text("Tasks copied successfully")));
+  }
+
+  Future<void> _changeDay(int offset) async {
+    setState(() {
+      selectedDate = selectedDate.add(Duration(days: offset));
+    });
+    await _loadTasks();
+  }
+
+  Widget _buildAnimatedTaskList() {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      transitionBuilder: (child, animation) {
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0.2, 0),
+            end: Offset.zero,
+          ).animate(animation),
+          child: FadeTransition(opacity: animation, child: child),
+        );
+      },
+      child: tasks.isEmpty
+          ? const Center(key: ValueKey("empty"), child: Text("No tasks yet"))
+          : ListView.builder(
+              key: ValueKey(selectedDate.toIso8601String()),
+              padding: const EdgeInsets.all(16),
+              itemCount: tasks.length,
+              itemBuilder: (context, index) {
+                final task = tasks[index];
+
+                return CheckboxListTile(
+                  title: Text(task['title']),
+                  value: task['isCompleted'] == 1,
+                  onChanged: (value) async {
+                    await _db.updateTaskStatus(task['id'], value ?? false);
+
+                    await _loadTasks();
+                  },
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildPlannerHeader() {
+    final today = DateTime.now();
+
+    List<DateTime> days = List.generate(
+      14,
+      (index) =>
+          today.subtract(const Duration(days: 3)).add(Duration(days: index)),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "${child['name']}'s Tasks",
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const SizedBox(height: 8),
+
+          // Selected full date
+          Text(
+            "${selectedDate.day}/${selectedDate.month}/${selectedDate.year}",
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+
+          const SizedBox(height: 12),
+
+          SizedBox(
+            height: 70,
+            child: ListView.builder(
+              controller: _dayScrollController,
+              scrollDirection: Axis.horizontal,
+              itemCount: days.length,
+              itemBuilder: (context, index) {
+                final date = days[index];
+                final isSelected =
+                    date.year == selectedDate.year &&
+                    date.month == selectedDate.month &&
+                    date.day == selectedDate.day;
+
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      selectedDate = date;
+                    });
+                    _loadTasks();
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
+                    margin: const EdgeInsets.only(right: 12),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 10,
+                      horizontal: 14,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? Theme.of(context).colorScheme.primary
+                          : Colors.grey.shade200,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          _weekdayShort(date.weekday),
+                          style: TextStyle(
+                            color: isSelected ? Colors.white : Colors.black54,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          "${date.day}",
+                          style: TextStyle(
+                            color: isSelected ? Colors.white : Colors.black,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

@@ -16,19 +16,17 @@ class ParentingHelperApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.deepPurple,
+          seedColor: const Color(0xFF5E60CE), // modern indigo
           brightness: Brightness.light,
         ),
 
-        scaffoldBackgroundColor: const Color(0xFFF6F8FC),
+        scaffoldBackgroundColor: const Color(0xFFF6F8FF),
 
         appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0),
 
         cardTheme: CardThemeData(
-          elevation: 3,
-          margin: const EdgeInsets.symmetric(vertical: 8),
+          elevation: 4,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
@@ -36,12 +34,12 @@ class ParentingHelperApp extends StatelessWidget {
 
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.deepPurple,
+            backgroundColor: const Color(0xFF4EA8DE),
             foregroundColor: Colors.white,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(18),
             ),
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 22),
           ),
         ),
 
