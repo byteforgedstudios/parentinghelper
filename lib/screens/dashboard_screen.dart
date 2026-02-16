@@ -31,8 +31,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     Map<int, Map<String, int>> stats = {};
 
+    final today = DateTime.now().toIso8601String().split('T').first;
+
     for (var child in kids) {
-      final tasks = await _db.getTasksForChild(child['id']);
+      final tasks = await _db.getTasksForChild(child['id'], today);
 
       int total = tasks.length;
       int completed = tasks.where((task) => task['isCompleted'] == 1).length;
@@ -53,15 +55,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          FloatingActionButton(
-            heroTag: "clearDB",
-            backgroundColor: Colors.red,
-            onPressed: () async {
-              await _db.clearDatabase();
-              await loadData();
-            },
-            child: const Icon(Icons.delete),
-          ),
           const SizedBox(height: 12),
           FloatingActionButton(
             heroTag: "addChild",

@@ -45,7 +45,8 @@ class DatabaseService {
       title TEXT,
       isCompleted INTEGER DEFAULT 0,
       starAwarded INTEGER DEFAULT 0,
-      date TEXT
+      date TEXT,
+      UNIQUE(childId, title, date)
     )
   ''');
 
@@ -100,41 +101,67 @@ class DatabaseService {
   // TASK METHODS
   // =========================
 
-  Future<int> insertTask(int childId, String title) async {
+  Future<void> insertTask(int childId, String title) async {
     final db = await database;
-    final today = DateTime.now().toIso8601String().substring(0, 10);
 
-    // Insert today's task
-    int taskId = await db.insert('tasks', {
-      'childId': childId,
-      'title': title,
-      'isCompleted': 0,
-      'starAwarded': 0,
-      'date': today,
-    });
+    final today = DateTime.now().toIso8601String().split('T').first;
 
-    // Check if template already exists
+    // 🔍 Check if task already exists for this child today
     final existing = await db.query(
-      'task_templates',
-      where: 'childId = ? AND title = ?',
-      whereArgs: [childId, title],
+      'tasks',
+      where: 'childId = ? AND title = ? AND date = ?',
+      whereArgs: [childId, title, today],
     );
 
-    if (existing.isEmpty) {
-      await db.insert('task_templates', {'childId': childId, 'title': title});
+    if (existing.isNotEmpty) {
+      return; // 🚫 Prevent duplicate
     }
 
-    return taskId;
+    // ✅ Insert only if not existing
+    await db.insert('tasks', {
+      'childId': childId,
+      'title': title,
+      'date': today,
+      'isCompleted': 0,
+      'starAwarded': 0,
+    });
   }
 
-  Future<List<Map<String, dynamic>>> getTasksForChild(int childId) async {
+  Future<void> insertTaskWithDate(
+    int childId,
+    String title,
+    String date,
+  ) async {
     final db = await database;
-    final today = DateTime.now().toIso8601String().substring(0, 10);
+
+    // Prevent duplicate for same child + date
+    final existing = await db.query(
+      'tasks',
+      where: 'childId = ? AND title = ? AND date = ?',
+      whereArgs: [childId, title, date],
+    );
+
+    if (existing.isNotEmpty) return;
+
+    await db.insert('tasks', {
+      'childId': childId,
+      'title': title,
+      'date': date,
+      'isCompleted': 0,
+      'starAwarded': 0,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getTasksForChild(
+    int childId,
+    String date,
+  ) async {
+    final db = await database;
 
     return await db.query(
       'tasks',
       where: 'childId = ? AND date = ?',
-      whereArgs: [childId, today],
+      whereArgs: [childId, date],
     );
   }
 
@@ -335,5 +362,21 @@ class DatabaseService {
   Future<void> deleteHistoryEntry(int historyId) async {
     final db = await database;
     await db.delete('reward_history', where: 'id = ?', whereArgs: [historyId]);
+  }
+
+  Future<int> insertTemplate(String title) async {
+    final db = await database;
+
+    return await db.insert('task_templates', {'title': title});
+  }
+
+  Future<List<Map<String, dynamic>>> getAllTemplates() async {
+    final db = await database;
+    return await db.query('task_templates');
+  }
+
+  Future<void> deleteTemplate(int id) async {
+    final db = await database;
+    await db.delete('task_templates', where: 'id = ?', whereArgs: [id]);
   }
 }
