@@ -1,18 +1,26 @@
-"""Builds docs/privacy.html from assets/legal/privacy_policy.md.
+"""Builds the Parenting Helper privacy policy web page from
+assets/legal/privacy_policy.md.
 
 The app shows the Markdown file in-app; this script turns the same text into
-the page published at https://byteforgedstudios.github.io/privacy.html, so the
-two never drift apart. Run from the project root after editing the policy:
+the page published at
+https://byteforgedstudios.github.io/parentinghelper/privacy.html, so the two
+never drift apart. The page uses the ByteForged Studios site's header and
+stylesheet. The site's root privacy.html is the studio-wide policy used by
+other apps; don't overwrite it.
+
+Run from the project root after editing the policy:
 
     python tool/build_privacy_html.py
+    python tool/build_privacy_html.py --out C:/work/byteforgedstudios.github.io/parentinghelper/privacy.html
 """
 
+import argparse
 import html
 import re
 from pathlib import Path
 
 SRC = Path("assets/legal/privacy_policy.md")
-OUT = Path("docs/privacy.html")
+DEFAULT_OUT = Path("docs/privacy.html")
 
 
 def inline(text: str) -> str:
@@ -24,55 +32,80 @@ def inline(text: str) -> str:
     )
 
 
-def render(markdown: str) -> tuple[str, str]:
-    title, parts = "Privacy Policy", []
+def render(markdown: str) -> tuple[str, str, str]:
+    """Returns (title, hero paragraphs, body sections)."""
+    title, hero, sections = "Privacy Policy", [], []
+    current: list[str] | None = None  # open <section>, None = still in hero
+
     for block in re.split(r"\n\s*\n", markdown.strip()):
         lines = block.strip().splitlines()
         first = lines[0]
         if first.startswith("# "):
             title = first[2:]
-            parts.append(f"<h1>{inline(title)}</h1>")
-        elif first.startswith("## "):
-            parts.append(f"<h2>{inline(first[3:])}</h2>")
-        elif all(l.startswith("- ") for l in lines):
+            continue
+        if first.startswith("## "):
+            current = [f"<h2>{inline(first[3:])}</h2>"]
+            sections.append(current)
+            continue
+        if all(l.startswith("- ") for l in lines):
             items = "".join(f"<li>{inline(l[2:])}</li>" for l in lines)
-            parts.append(f"<ul>{items}</ul>")
+            part = f"<ul>{items}</ul>"
         else:
-            parts.append(f"<p>{inline(' '.join(lines))}</p>")
-    return title, "\n".join(parts)
+            part = f"<p>{inline(' '.join(lines))}</p>"
+        (hero if current is None else current).append(part)
+
+    body = "\n".join(
+        "  <section>\n    " + "\n    ".join(s) + "\n  </section>" for s in sections
+    )
+    return title, "\n    ".join(hero), body
 
 
 def main() -> None:
-    title, body = render(SRC.read_text(encoding="utf-8"))
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    out = parser.parse_args().out
+
+    title, hero, body = render(SRC.read_text(encoding="utf-8"))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
         f"""<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{html.escape(title)}</title>
-<style>
-  :root {{ color-scheme: light dark; --fg: #1d1b20; --bg: #ffffff; --accent: #5e60ce; }}
-  @media (prefers-color-scheme: dark) {{ :root {{ --fg: #e6e1e5; --bg: #141218; --accent: #a5a6f6; }} }}
-  body {{ margin: 0; background: var(--bg); color: var(--fg);
-         font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }}
-  main {{ max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }}
-  h1 {{ font-size: 1.8rem; line-height: 1.25; }}
-  h2 {{ font-size: 1.25rem; margin-top: 2rem; }}
-  a {{ color: var(--accent); }}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{html.escape(title)} – ByteForged Studios</title>
+  <link rel="stylesheet" href="../style.css" />
+  <style>
+    section a {{ color: #FBD160; }}
+    section li {{ margin-bottom: 6px; line-height: 1.5em; }}
+    section p {{ line-height: 1.5em; }}
+  </style>
 </head>
 <body>
-<main>
+  <header>
+    <div class="logo">ByteForged Studios</div>
+    <nav>
+      <a href="../index.html">Home</a>
+      <a href="privacy.html">Parenting Helper Privacy</a>
+    </nav>
+  </header>
+
+  <section id="hero">
+    <h1>{inline(title)}</h1>
+    {hero}
+  </section>
+
 {body}
-</main>
+
+  <footer>
+    &copy; 2026 ByteForged Studios. All rights reserved.
+  </footer>
 </body>
 </html>
 """,
         encoding="utf-8",
     )
-    print(f"Wrote {OUT}")
+    print(f"Wrote {out}")
 
 
 if __name__ == "__main__":

@@ -4,8 +4,12 @@ Everything needed to publish Parenting Helper (`com.byteforgedstudios.parentingh
 
 ## 1. Privacy policy (required)
 
-1. Run `python tool/build_privacy_html.py` after any change to `assets/legal/privacy_policy.md`. It writes `docs/privacy.html`.
-2. Publish `docs/privacy.html` as `privacy.html` in the `byteforgedstudios.github.io` GitHub Pages repo, so it's live at <https://byteforgedstudios.github.io/privacy.html>. That URL is set in `lib/state/app_info.dart`.
+1. After any change to `assets/legal/privacy_policy.md`, regenerate the page straight into the GitHub Pages repo, then commit and push that repo:
+   ```
+   python tool/build_privacy_html.py --out C:/work/byteforgedstudios.github.io/parentinghelper/privacy.html
+   ```
+   It goes live at <https://byteforgedstudios.github.io/parentinghelper/privacy.html>, the URL set in `lib/state/app_info.dart`. Without `--out` the script writes a local copy to `docs/privacy.html`.
+2. Don't overwrite the site's root `privacy.html`: that's the studio-wide policy other apps (e.g. Electronics Toolbox) link to.
 3. **[Console]** App content → Privacy policy → paste the URL.
 4. If the policy changes, bump `kPrivacyPolicyVersion` in `lib/state/app_info.dart`. Parents are asked to agree again on next launch.
 
@@ -103,7 +107,7 @@ Premium is $2.99/month or $19.99/year, with a 7-day free trial on the yearly pla
 
 **Category:** Parenting. **Tags:** Parenting, Family, Productivity.
 
-**Graphics:** 512×512 app icon, 1024×500 feature graphic, and at least 2 phone screenshots (Home, a child's tasks, Rewards, Reports).
+**Graphics:** 512×512 app icon (ready at `assets/icon/play_store_icon_512.png`), 1024×500 feature graphic, and at least 2 phone screenshots (Home, a child's tasks, Rewards, Reports).
 
 **Contact details:** ByteForgedStudios@gmail.com
 

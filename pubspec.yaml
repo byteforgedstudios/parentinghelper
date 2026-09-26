@@ -97,8 +97,13 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
-flutter_icons:
+# Launcher icons: run `dart run flutter_launcher_icons` after changing these.
+# Sources are generated from assets/images/family.png (see assets/icon/).
+flutter_launcher_icons:
   android: true
   ios: false
-  image_path: "assets/images/family.png"
+  min_sdk_android: 21
+  image_path: "assets/icon/icon_legacy.png"
+  adaptive_icon_background: "#E3F2FD"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
   
