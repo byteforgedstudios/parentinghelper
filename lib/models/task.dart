@@ -14,18 +14,18 @@ class Task {
   });
 
   Map<String, dynamic> toMap() => {
-        'id': id,
-        'childId': childId,
-        'title': title,
-        'completed': completed ? 1 : 0,
-        'date': date,
-      };
+    'id': id,
+    'childId': childId,
+    'title': title,
+    'completed': completed ? 1 : 0,
+    'date': date,
+  };
 
   factory Task.fromMap(Map<String, dynamic> map) => Task(
-        id: map['id'],
-        childId: map['childId'],
-        title: map['title'],
-        completed: map['completed'] == 1,
-        date: map['date'],
-      );
+    id: map['id'],
+    childId: map['childId'],
+    title: map['title'],
+    completed: map['completed'] == 1,
+    date: map['date'],
+  );
 }

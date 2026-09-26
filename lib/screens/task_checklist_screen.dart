@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
 import '../services/limit_service.dart';
+import '../services/parental_gate.dart';
+import '../state/app_limits.dart';
+import '../state/routine_days.dart';
+import '../widgets/read_only_banner.dart';
+import '../widgets/task_dialog.dart';
+import 'paywall_screen.dart';
+import 'routines_screen.dart';
 
 class TaskChecklistScreen extends StatefulWidget {
   const TaskChecklistScreen({super.key});
@@ -11,61 +18,46 @@ class TaskChecklistScreen extends StatefulWidget {
 
 class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
   final DatabaseService _db = DatabaseService();
-  final LimitService _limits = LimitService(isPremium: false);
+  final LimitService _limits = LimitService();
+  final ParentalGate _gate = ParentalGate.instance;
   List<Map<String, dynamic>> tasks = [];
   late Map<String, dynamic> child;
   DateTime selectedDate = DateUtils.dateOnly(DateTime.now());
   final ScrollController _dayScrollController = ScrollController();
 
-  String get formattedDate => selectedDate.toIso8601String().split('T').first;
+  // Without Premium: extra children are read-only, and tasks beyond the
+  // first 5 of a day can't be ticked.
+  bool _readOnly = false;
+  Set<int> _editableIds = {};
 
-  @override
-  void initState() {
-    super.initState();
-  }
+  String get formattedDate => selectedDate.toIso8601String().split('T').first;
 
   bool _initialized = false;
 
   String get prettyDate {
-    return "${_weekday(selectedDate.weekday)}, "
-        "${selectedDate.day} "
-        "${_month(selectedDate.month)} "
-        "${selectedDate.year}";
-  }
-
-  String _weekday(int day) {
-    const names = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    return names[day];
-  }
-
-  String _month(int month) {
-    const names = [
-      "",
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
-    return names[month];
+    return "${kDayNames[selectedDate.weekday - 1]}, "
+        "${selectedDate.day} ${months[selectedDate.month - 1]} "
+        "${selectedDate.year}";
   }
 
   // Calendar-day arithmetic. Adding Duration(days: n) adds 24-hour blocks,
   // which skips or repeats a day across a daylight-saving change.
   DateTime _addDays(DateTime date, int days) =>
       DateTime(date.year, date.month, date.day + days);
-
-  String _weekdayShort(int weekday) {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    return days[weekday - 1];
-  }
 
   @override
   void didChangeDependencies() {
@@ -74,103 +66,119 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
     if (!_initialized) {
       child =
           ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
-      _initializeTasks();
+      _loadTasks();
       _initialized = true;
     }
   }
 
-  Future<void> _initializeTasks() async {
-    await _db.generateDailyTasksIfNeeded(child['id']);
-    await _loadTasks();
+  @override
+  void dispose() {
+    _dayScrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadTasks() async {
     final date = formattedDate;
+    final readOnly = await _limits.isChildReadOnly(child['id']);
 
+    // Create today's/future tasks from the child's routines.
+    if (!readOnly) {
+      await _db.generateRoutineTasks(
+        child['id'],
+        selectedDate,
+        maxTasks: _limits.isPremium ? null : FREE_MAX_TASKS_PER_CHILD,
+      );
+    }
     final loadedTasks = await _db.getTasksForChild(child['id'], date);
 
     // Ignore stale results if the user moved to another day meanwhile.
     if (!mounted || date != formattedDate) return;
     setState(() {
       tasks = loadedTasks;
+      _readOnly = readOnly;
+      _editableIds = readOnly ? {} : _limits.editableTaskIds(loadedTasks);
     });
   }
 
   Future<void> addTask() async {
-    TextEditingController controller = TextEditingController();
-    final templates = await _db.getAllTemplates();
+    if (!await _gate.requireParent(
+          context,
+          reason: 'Enter your PIN to add a task.',
+        ) ||
+        !mounted) {
+      return;
+    }
 
-    if (!mounted) return;
-    await showDialog(
+    final result = await showTaskDialog(
+      context,
+      dialogTitle: "Add Task",
+      oneOffLabel: "Just on $prettyDate",
+    );
+    if (result == null || !mounted) return;
+    final (title, repeatDays) = result;
+
+    // Save to the day being viewed, not always today.
+    final date = formattedDate;
+    if (!await _limits.canAddTask(child['id'], date)) {
+      if (!mounted) return;
+      // Paywall Screen 2: adding a 6th task on the free plan.
+      if (!await showPaywall(context, PaywallTrigger.addTask)) return;
+    }
+
+    if (repeatDays == 0) {
+      await _db.insertTaskWithDate(child['id'], title, date);
+    } else {
+      // A routine; its task for the viewed day is created by _loadTasks
+      // (if the day is one of the repeat days).
+      await _db.insertRoutine(child['id'], title, repeatDays);
+    }
+    await _loadTasks();
+  }
+
+  Future<void> _deleteTask(Map<String, dynamic> task) async {
+    if (!await _gate.requireParent(
+          context,
+          reason: 'Enter your PIN to delete a task.',
+        ) ||
+        !mounted) {
+      return;
+    }
+
+    final fromRoutine = task['routineId'] != null;
+    final confirm = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("Add Task"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Manual entry
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(hintText: "Enter task name"),
-            ),
-
-            const SizedBox(height: 20),
-
-            // Template dropdown
-            if (templates.isNotEmpty)
-              DropdownButtonFormField<Map<String, dynamic>>(
-                hint: const Text("Or select from templates"),
-                items: templates.map((template) {
-                  return DropdownMenuItem(
-                    value: template,
-                    child: Text(template['title']),
-                  );
-                }).toList(),
-                onChanged: (selected) {
-                  if (selected != null) {
-                    controller.text = selected['title'];
-                  }
-                },
-              ),
-          ],
+      builder: (context) => AlertDialog(
+        title: Text("Delete \"${task['title']}\"?"),
+        content: Text(
+          fromRoutine
+              ? "This removes it from $prettyDate only. To stop it repeating, "
+                    "edit the routine."
+              : "This removes it from $prettyDate.",
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text("Cancel"),
           ),
           ElevatedButton(
-            onPressed: () async {
-              final title = controller.text.trim();
-              if (title.isEmpty) return;
-
-              // Save to the day being viewed, not always today.
-              final date = formattedDate;
-              if (!await _limits.canAddTask(child['id'], date)) {
-                if (!mounted) return;
-                Navigator.pop(context);
-                // TODO: show Paywall Screen 2 (Unlock Unlimited Tasks)
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      "The free plan allows 5 tasks per day. Upgrade to Premium for unlimited tasks.",
-                    ),
-                  ),
-                );
-                return;
-              }
-
-              await _db.insertTaskWithDate(child['id'], title, date);
-
-              if (!mounted) return;
-              Navigator.pop(context);
-              _loadTasks();
-            },
-            child: const Text("Add"),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Delete"),
           ),
         ],
       ),
     );
+    if (confirm != true) return;
+
+    await _db.deleteTask(task['id']);
+    await _loadTasks();
+  }
+
+  Future<void> _openRoutines() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => RoutinesScreen(child: child)),
+    );
+    await _loadTasks();
   }
 
   @override
@@ -179,11 +187,20 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
       appBar: AppBar(
         title: Text("${child['name']}'s Tasks"),
         actions: [
+          if (!_readOnly) ...[
+            IconButton(
+              tooltip: "Routines",
+              icon: const Icon(Icons.repeat),
+              onPressed: _openRoutines,
+            ),
+            IconButton(
+              tooltip: "Copy tasks to other days",
+              icon: const Icon(Icons.copy),
+              onPressed: copyTasksToSelectedDays,
+            ),
+          ],
           IconButton(
-            icon: const Icon(Icons.copy),
-            onPressed: copyTasksToSelectedDays,
-          ),
-          IconButton(
+            tooltip: "Pick a date",
             icon: const Icon(Icons.calendar_today),
             onPressed: () async {
               final picked = await showDatePicker(
@@ -203,10 +220,13 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: addTask,
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: _readOnly
+          ? null
+          : FloatingActionButton(
+              tooltip: "Add task",
+              onPressed: addTask,
+              child: const Icon(Icons.add),
+            ),
       body: GestureDetector(
         onHorizontalDragEnd: (details) async {
           if (details.primaryVelocity == null) return;
@@ -221,8 +241,18 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
         },
         child: Column(
           children: [
+            if (_readOnly)
+              ReadOnlyBanner(
+                message:
+                    "${child['name']} is read-only because Premium has "
+                    "ended. Upgrade to tick tasks and plan again.",
+                onUpgrade: () async {
+                  await showPaywall(context, PaywallTrigger.readOnly);
+                  await _loadTasks();
+                },
+              ),
             _buildPlannerHeader(),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
             Expanded(child: _buildAnimatedTaskList()),
           ],
         ),
@@ -231,6 +261,14 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
   }
 
   Future<void> copyTasksToSelectedDays() async {
+    if (!await _gate.requireParent(
+          context,
+          reason: 'Enter your PIN to copy tasks.',
+        ) ||
+        !mounted) {
+      return;
+    }
+
     final picked = await showDateRangePicker(
       context: context,
       firstDate: DateTime(2024),
@@ -260,6 +298,12 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
+        action: hitLimit
+            ? SnackBarAction(
+                label: "Upgrade",
+                onPressed: () => showPaywall(context, PaywallTrigger.addTask),
+              )
+            : null,
         content: Text(
           hitLimit
               ? "Some tasks were not copied: the free plan allows 5 tasks per day."
@@ -293,22 +337,47 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
           ? const Center(key: ValueKey("empty"), child: Text("No tasks yet"))
           : ListView.builder(
               key: ValueKey(selectedDate.toIso8601String()),
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
               itemCount: tasks.length,
-              itemBuilder: (context, index) {
-                final task = tasks[index];
-
-                return CheckboxListTile(
-                  title: Text(task['title']),
-                  value: task['isCompleted'] == 1,
-                  onChanged: (value) async {
-                    await _db.updateTaskStatus(task['id'], value ?? false);
-
-                    await _loadTasks();
-                  },
-                );
-              },
+              itemBuilder: (context, index) => _buildTaskTile(tasks[index]),
             ),
+    );
+  }
+
+  Widget _buildTaskTile(Map<String, dynamic> task) {
+    final editable = _editableIds.contains(task['id']);
+    final fromRoutine = task['routineId'] != null;
+    final lockedByPlan = !_readOnly && !editable;
+
+    return GestureDetector(
+      onLongPress: _readOnly ? null : () => _deleteTask(task),
+      child: CheckboxListTile(
+        title: Text(task['title']),
+        subtitle: lockedByPlan
+            ? const Text("Premium: free plan ticks 5 tasks a day")
+            : fromRoutine
+            ? const Text("Routine")
+            : null,
+        secondary: lockedByPlan
+            ? IconButton(
+                tooltip: "Unlock with Premium",
+                icon: const Icon(Icons.lock_outline),
+                onPressed: () async {
+                  await showPaywall(context, PaywallTrigger.readOnly);
+                  await _loadTasks();
+                },
+              )
+            : fromRoutine
+            ? const Icon(Icons.repeat, size: 20)
+            : null,
+        value: task['isCompleted'] == 1,
+        onChanged: editable
+            ? (value) async {
+                await _db.updateTaskStatus(task['id'], value ?? false);
+                await _loadTasks();
+              }
+            : null,
+      ),
     );
   }
 
@@ -325,20 +394,8 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "${child['name']}'s Tasks",
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: 8),
-
-          // Selected full date
-          Text(
-            "${selectedDate.day}/${selectedDate.month}/${selectedDate.year}",
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-
+          Text(prettyDate, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 12),
-
           SizedBox(
             height: 70,
             child: ListView.builder(
@@ -376,7 +433,7 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          _weekdayShort(date.weekday),
+                          kDayNames[date.weekday - 1],
                           style: TextStyle(
                             color: isSelected ? Colors.white : Colors.black54,
                             fontSize: 12,

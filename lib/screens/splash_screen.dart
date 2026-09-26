@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import '../services/consent_service.dart';
+import 'app_shell.dart';
 import 'intro_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -11,7 +13,6 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
-
   late AnimationController _controller;
   late Animation<double> _animation;
   Timer? _timer;
@@ -32,13 +33,20 @@ class _SplashScreenState extends State<SplashScreen>
 
     _controller.forward();
 
-    _timer = Timer(const Duration(seconds: 3), () {
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const IntroScreen()),
-      );
-    });
+    _timer = Timer(const Duration(seconds: 3), _next);
+  }
+
+  // Returning parents who already agreed to the current privacy policy go
+  // straight to the app; everyone else sees the intro and consent screens.
+  Future<void> _next() async {
+    final consented = await ConsentService().hasCurrentConsent();
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => consented ? const AppShell() : const IntroScreen(),
+      ),
+    );
   }
 
   @override
@@ -58,10 +66,7 @@ class _SplashScreenState extends State<SplashScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Image.asset(
-                'assets/images/family.png',
-                width: 140,
-              ),
+              Image.asset('assets/images/family.png', width: 140),
               const SizedBox(height: 20),
               const Text(
                 "Parenting Helper",

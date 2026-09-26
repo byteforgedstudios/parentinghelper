@@ -1,4 +1,4 @@
-package com.example.parentinghelper
+package com.byteforgedstudios.parentinghelper
 
 import io.flutter.embedding.android.FlutterActivity
 

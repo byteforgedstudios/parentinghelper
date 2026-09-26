@@ -1,11 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:parentinghelper/app.dart';
 
 void main() {
-  testWidgets('Splash screen moves on to the intro screen', (
+  testWidgets('First launch goes from splash to the intro screen', (
     WidgetTester tester,
   ) async {
+    // No consent recorded yet.
+    SharedPreferences.setMockInitialValues({});
+
     await tester.pumpWidget(const ParentingHelperApp());
 
     expect(find.text('Parenting Helper'), findsOneWidget);

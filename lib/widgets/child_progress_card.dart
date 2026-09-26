@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'child_avatar.dart';
 
 class ChildProgressCard extends StatelessWidget {
   final String name;
+  final String? avatar;
+  final bool readOnly;
   final int completed;
   final int total;
   final int stars;
@@ -11,6 +14,8 @@ class ChildProgressCard extends StatelessWidget {
   const ChildProgressCard({
     super.key,
     required this.name,
+    this.avatar,
+    this.readOnly = false,
     required this.completed,
     required this.total,
     required this.stars,
@@ -31,12 +36,26 @@ class ChildProgressCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                name,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
+              Row(
+                children: [
+                  ChildAvatar(avatar: avatar, radius: 20),
+                  const SizedBox(width: 12),
+                  Text(
+                    name,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (readOnly) ...[
+                    const Spacer(),
+                    const Chip(
+                      avatar: Icon(Icons.lock_outline, size: 16),
+                      label: Text("Read-only"),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
+                ],
               ),
               const SizedBox(height: 8),
               LinearProgressIndicator(value: progress),

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'dashboard_screen.dart';
 import 'kids/kids_management_screen.dart';
 import 'rewards/rewards_management_screen.dart';
-import 'premium/premium_screen.dart';
+import 'settings_screen.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -18,7 +18,7 @@ class _AppShellState extends State<AppShell> {
     DashboardScreen(),
     KidsManagementScreen(),
     RewardsManagementScreen(),
-    PremiumScreen(),
+    SettingsScreen(),
   ];
 
   void _onItemTapped(int index) {
@@ -38,7 +38,7 @@ class _AppShellState extends State<AppShell> {
           NavigationDestination(
             icon: Icon(Icons.dashboard_outlined),
             selectedIcon: Icon(Icons.dashboard),
-            label: 'Dashboard',
+            label: 'Home',
           ),
           NavigationDestination(
             icon: Icon(Icons.child_care_outlined),
@@ -51,9 +51,9 @@ class _AppShellState extends State<AppShell> {
             label: 'Rewards',
           ),
           NavigationDestination(
-            icon: Icon(Icons.star_outline),
-            selectedIcon: Icon(Icons.star),
-            label: 'Premium',
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: 'Settings',
           ),
         ],
       ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
+import '../services/parental_gate.dart';
 import 'package:intl/intl.dart';
 
 class RewardHistoryScreen extends StatefulWidget {
@@ -58,6 +59,12 @@ class _RewardHistoryScreenState extends State<RewardHistoryScreen> {
   }
 
   Future<void> deleteEntry(int id) async {
+    if (!await ParentalGate.instance.requireParent(
+      context,
+      reason: 'Enter your PIN to delete a history entry.',
+    )) {
+      return;
+    }
     await _db.deleteHistoryEntry(id);
     await loadHistory();
   }

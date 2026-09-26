@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'login_screen.dart';
+import 'consent_screen.dart';
 
 class IntroScreen extends StatelessWidget {
   const IntroScreen({super.key});
@@ -14,17 +14,11 @@ class IntroScreen extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Image.asset(
-                'assets/images/family.png',
-                height: 160,
-              ),
+              Image.asset('assets/images/family.png', height: 160),
               const SizedBox(height: 24),
               const Text(
                 "Parenting Helper",
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
               const Text(
@@ -35,17 +29,18 @@ class IntroScreen extends StatelessWidget {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 40, vertical: 14),
+                    horizontal: 40,
+                    vertical: 14,
+                  ),
                 ),
                 onPressed: () {
                   Navigator.pushReplacement(
                     context,
-                    MaterialPageRoute(
-                        builder: (_) => const LoginScreen()),
+                    MaterialPageRoute(builder: (_) => const ConsentScreen()),
                   );
                 },
                 child: const Text("Get Started"),
-              )
+              ),
             ],
           ),
         ),

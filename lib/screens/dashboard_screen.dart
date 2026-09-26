@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
 import '../services/limit_service.dart';
+import '../services/parental_gate.dart';
+import '../state/app_limits.dart';
 import '../widgets/child_progress_card.dart';
+import 'paywall_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -14,6 +17,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final DatabaseService _db = DatabaseService();
 
   List<Map<String, dynamic>> children = [];
+  Set<int> activeChildIds = {};
   Map<int, Map<String, int>> childStats = {};
 
   @override
@@ -41,6 +45,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!mounted) return;
     setState(() {
       children = kids;
+      activeChildIds = LimitService().isPremium
+          ? kids.map((c) => c['id'] as int).toSet()
+          : firstIds(kids, FREE_MAX_CHILDREN);
       childStats = stats;
     });
   }
@@ -52,9 +59,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
         title: const Text("Parent Dashboard"),
         actions: [
           IconButton(
-            icon: const Icon(Icons.list_alt),
-            tooltip: "Task Templates",
-            onPressed: () => Navigator.pushNamed(context, '/taskTemplates'),
+            icon: const Icon(Icons.insights),
+            tooltip: "Reports",
+            onPressed: () async {
+              // Paywall Screen 3: Reports are locked on the free plan.
+              if (await showPaywall(context, PaywallTrigger.reports) &&
+                  context.mounted) {
+                Navigator.pushNamed(context, '/reports');
+              }
+            },
           ),
         ],
       ),
@@ -64,21 +77,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(height: 12),
           FloatingActionButton(
             heroTag: "addChild",
+            tooltip: "Add child",
             onPressed: () async {
-              final canAdd = await LimitService(isPremium: false).canAddChild();
-              if (!context.mounted) return;
-
-              if (!canAdd) {
-                // TODO: show Paywall Screen 1 (Add Another Child)
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      "The free plan allows 1 child. Upgrade to Premium to add more.",
-                    ),
-                  ),
-                );
+              if (!await ParentalGate.instance.requireParent(
+                    context,
+                    reason: 'Enter your PIN to add a child.',
+                  ) ||
+                  !context.mounted) {
                 return;
               }
+              final canAdd = await LimitService().canAddChild();
+              if (!context.mounted) return;
+
+              // Paywall Screen 1: adding a 2nd child on the free plan.
+              if (!canAdd &&
+                  !await showPaywall(context, PaywallTrigger.addChild)) {
+                return;
+              }
+              if (!context.mounted) return;
 
               await Navigator.pushNamed(context, '/addChild');
               await loadData();
@@ -99,6 +115,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                 return ChildProgressCard(
                   name: child['name'],
+                  avatar: child['avatar'],
+                  readOnly: !activeChildIds.contains(child['id']),
                   completed: stats["completed"]!,
                   total: stats["total"]!,
                   stars: child['stars'] ?? 0,

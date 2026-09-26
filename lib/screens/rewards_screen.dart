@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
+import '../services/limit_service.dart';
+import '../services/parental_gate.dart';
+import '../widgets/read_only_banner.dart';
+import '../widgets/reward_icon.dart';
+import 'paywall_screen.dart';
 
 class RewardsScreen extends StatefulWidget {
   const RewardsScreen({super.key});
@@ -10,11 +15,18 @@ class RewardsScreen extends StatefulWidget {
 
 class _RewardsScreenState extends State<RewardsScreen> {
   final DatabaseService _db = DatabaseService();
+  final LimitService _limits = LimitService();
+  final ParentalGate _gate = ParentalGate.instance;
 
   late Map<String, dynamic> child;
   int stars = 0;
   List<Map<String, dynamic>> rewards = [];
   bool _initialized = false;
+
+  // Without Premium: extra children are read-only, and only the first 3
+  // rewards of each child can be redeemed.
+  bool _readOnly = false;
+  Set<int> _redeemableIds = {};
 
   @override
   void didChangeDependencies() {
@@ -62,12 +74,69 @@ class _RewardsScreenState extends State<RewardsScreen> {
     await loadStars();
   }
 
+  Future<void> deleteReward(Map<String, dynamic> reward) async {
+    if (!await _gate.requireParent(
+          context,
+          reason: 'Enter your PIN to delete a reward.',
+        ) ||
+        !mounted) {
+      return;
+    }
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Delete ${reward['title']}?"),
+        content: const Text("Past redemptions stay in the history."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    await _db.deleteReward(reward['id']);
+    await loadRewards();
+  }
+
   Future<void> loadRewards() async {
     final data = await _db.getRewardsForChild(child['id']);
+    final readOnly = await _limits.isChildReadOnly(child['id']);
     if (!mounted) return;
     setState(() {
       rewards = data;
+      _readOnly = readOnly;
+      _redeemableIds = readOnly ? {} : _limits.redeemableRewardIds(data);
     });
+  }
+
+  Future<void> _addReward() async {
+    if (!await _gate.requireParent(
+          context,
+          reason: 'Enter your PIN to add a reward.',
+        ) ||
+        !mounted) {
+      return;
+    }
+    // Free plan: 3 rewards per child.
+    if (!await _limits.canAddReward(child['id'])) {
+      if (!mounted) return;
+      if (!await showPaywall(context, PaywallTrigger.addReward)) return;
+    }
+    if (!mounted) return;
+    await Navigator.pushNamed(context, '/addReward', arguments: child);
+    await loadRewards();
+  }
+
+  Future<void> _upgrade() async {
+    await showPaywall(context, PaywallTrigger.readOnly);
+    await loadRewards();
   }
 
   @override
@@ -77,6 +146,7 @@ class _RewardsScreenState extends State<RewardsScreen> {
         title: Text("${child['name']}'s Rewards"),
         actions: [
           IconButton(
+            tooltip: "Reward history",
             icon: const Icon(Icons.history),
             onPressed: () {
               Navigator.pushNamed(context, '/rewardHistory', arguments: child);
@@ -85,20 +155,26 @@ class _RewardsScreenState extends State<RewardsScreen> {
         ],
       ),
 
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          await Navigator.pushNamed(context, '/addReward', arguments: child);
-
-          if (!mounted) return;
-          loadRewards(); // refresh after adding
-        },
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: _readOnly
+          ? null
+          : FloatingActionButton(
+              tooltip: "Add reward",
+              onPressed: _addReward,
+              child: const Icon(Icons.add),
+            ),
 
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            if (_readOnly) ...[
+              ReadOnlyBanner(
+                message:
+                    "${child['name']} is read-only because Premium has ended.",
+                onUpgrade: _upgrade,
+              ),
+              const SizedBox(height: 12),
+            ],
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(24),
@@ -152,6 +228,8 @@ class _RewardsScreenState extends State<RewardsScreen> {
 
   Widget rewardTile(Map<String, dynamic> reward) {
     final int cost = reward['cost'];
+    final redeemable = _redeemableIds.contains(reward['id']);
+    final lockedByPlan = !_readOnly && !redeemable;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -161,47 +239,47 @@ class _RewardsScreenState extends State<RewardsScreen> {
             horizontal: 20,
             vertical: 12,
           ),
-          leading: const CircleAvatar(
-            backgroundColor: Colors.amber,
-            child: Icon(Icons.card_giftcard, color: Colors.white),
-          ),
+          leading: RewardIcon(icon: reward['icon']),
+          onLongPress: _readOnly ? null : () => deleteReward(reward),
           title: Text(
             reward['title'],
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
-          subtitle: Text("$cost ⭐"),
-          trailing: ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: stars >= cost ? Colors.deepPurple : Colors.grey,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            onPressed: () async {
-              final confirm = await showDialog<bool>(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: const Text("Confirm Redemption"),
-                  content: Text("Redeem ${reward['title']} for $cost stars?"),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, false),
-                      child: const Text("Cancel"),
-                    ),
-                    ElevatedButton(
-                      onPressed: () => Navigator.pop(context, true),
-                      child: const Text("Redeem"),
-                    ),
-                  ],
-                ),
-              );
-
-              if (confirm == true) {
-                redeem(reward['id'], cost);
-              }
-            },
-            child: const Text("Redeem"),
+          subtitle: Text(
+            lockedByPlan
+                ? "$cost ⭐  •  Premium: free plan has 3 rewards"
+                : "$cost ⭐  •  hold to delete",
           ),
+          trailing: lockedByPlan
+              ? IconButton(
+                  tooltip: "Unlock with Premium",
+                  icon: const Icon(Icons.lock_outline),
+                  onPressed: _upgrade,
+                )
+              : ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: stars >= cost
+                        ? Colors.deepPurple
+                        : Colors.grey,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onPressed: _readOnly
+                      ? null
+                      : () async {
+                          // The PIN prompt doubles as the redemption confirmation.
+                          if (await _gate.requireParent(
+                            context,
+                            reason:
+                                "Redeem ${reward['title']} for $cost stars? "
+                                "Enter your PIN to confirm.",
+                          )) {
+                            redeem(reward['id'], cost);
+                          }
+                        },
+                  child: const Text("Redeem"),
+                ),
         ),
       ),
     );

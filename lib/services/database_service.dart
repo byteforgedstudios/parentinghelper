@@ -1,6 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../state/routine_days.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -18,7 +18,51 @@ class DatabaseService {
   Future<Database> _initDatabase() async {
     final path = join(await getDatabasesPath(), 'parenting_helper.db');
 
-    return await openDatabase(path, version: 1, onCreate: _onCreate);
+    return await openDatabase(
+      path,
+      version: 3,
+      onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
+    );
+  }
+
+  // v2: child avatars, reward icons, and reward title/cost copied into
+  // history so past redemptions survive deleting a reward.
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('ALTER TABLE children ADD COLUMN avatar TEXT');
+      await db.execute('ALTER TABLE rewards ADD COLUMN icon TEXT');
+      await db.execute('ALTER TABLE reward_history ADD COLUMN title TEXT');
+      await db.execute('ALTER TABLE reward_history ADD COLUMN cost INTEGER');
+    }
+    // v3: per-child recurring routines replace the global task templates.
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE tasks ADD COLUMN routineId INTEGER');
+      await _createRoutineTables(db);
+      await db.execute('DROP TABLE IF EXISTS task_templates');
+    }
+  }
+
+  Future<void> _createRoutineTables(Database db) async {
+    // days: bitmask, bit 0 = Monday ... bit 6 = Sunday.
+    await db.execute('''
+    CREATE TABLE routines(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      childId INTEGER,
+      title TEXT,
+      days INTEGER
+    )
+  ''');
+
+    // Which routine tasks have been created, so a task the parent deletes
+    // isn't recreated.
+    await db.execute('''
+    CREATE TABLE routine_generated(
+      routineId INTEGER,
+      date TEXT,
+      PRIMARY KEY(routineId, date)
+    )
+  ''');
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -26,15 +70,8 @@ class DatabaseService {
     CREATE TABLE children(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT,
-      stars INTEGER DEFAULT 0
-    )
-  ''');
-
-    await db.execute('''
-    CREATE TABLE task_templates(
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      childId INTEGER,
-      title TEXT
+      stars INTEGER DEFAULT 0,
+      avatar TEXT
     )
   ''');
 
@@ -46,16 +83,20 @@ class DatabaseService {
       isCompleted INTEGER DEFAULT 0,
       starAwarded INTEGER DEFAULT 0,
       date TEXT,
+      routineId INTEGER,
       UNIQUE(childId, title, date)
     )
   ''');
+
+    await _createRoutineTables(db);
 
     await db.execute('''
     CREATE TABLE rewards(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       childId INTEGER,
       title TEXT,
-      cost INTEGER
+      cost INTEGER,
+      icon TEXT
     )
   ''');
 
@@ -64,7 +105,9 @@ class DatabaseService {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       childId INTEGER,
       rewardId INTEGER,
-      date TEXT
+      date TEXT,
+      title TEXT,
+      cost INTEGER
     )
   ''');
   }
@@ -73,9 +116,23 @@ class DatabaseService {
   // CHILD METHODS
   // =========================
 
-  Future<int> insertChild(String name) async {
+  Future<int> insertChild(String name, {String? avatar}) async {
     final db = await database;
-    return await db.insert('children', {'name': name, 'stars': 0});
+    return await db.insert('children', {
+      'name': name,
+      'stars': 0,
+      'avatar': avatar,
+    });
+  }
+
+  Future<void> updateChild(int id, String name, String? avatar) async {
+    final db = await database;
+    await db.update(
+      'children',
+      {'name': name, 'avatar': avatar},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<List<Map<String, dynamic>>> getChildren() async {
@@ -98,38 +155,18 @@ class DatabaseService {
       await txn.delete('tasks', where: 'childId = ?', whereArgs: [id]);
       await txn.delete('rewards', where: 'childId = ?', whereArgs: [id]);
       await txn.delete('reward_history', where: 'childId = ?', whereArgs: [id]);
+      await txn.rawDelete(
+        'DELETE FROM routine_generated WHERE routineId IN '
+        '(SELECT id FROM routines WHERE childId = ?)',
+        [id],
+      );
+      await txn.delete('routines', where: 'childId = ?', whereArgs: [id]);
     });
   }
 
   // =========================
   // TASK METHODS
   // =========================
-
-  Future<void> insertTask(int childId, String title) async {
-    final db = await database;
-
-    final today = DateTime.now().toIso8601String().split('T').first;
-
-    // 🔍 Check if task already exists for this child today
-    final existing = await db.query(
-      'tasks',
-      where: 'childId = ? AND title = ? AND date = ?',
-      whereArgs: [childId, title, today],
-    );
-
-    if (existing.isNotEmpty) {
-      return; // 🚫 Prevent duplicate
-    }
-
-    // ✅ Insert only if not existing
-    await db.insert('tasks', {
-      'childId': childId,
-      'title': title,
-      'date': today,
-      'isCompleted': 0,
-      'starAwarded': 0,
-    });
-  }
 
   Future<void> insertTaskWithDate(
     int childId,
@@ -166,6 +203,7 @@ class DatabaseService {
       'tasks',
       where: 'childId = ? AND date = ?',
       whereArgs: [childId, date],
+      orderBy: 'id',
     );
   }
 
@@ -244,82 +282,178 @@ class DatabaseService {
     await db.delete('tasks', where: 'date < ?', whereArgs: [today]);
   }
 
+  /// Deletes every child, task, routine, reward and redemption.
   Future<void> clearDatabase() async {
     final db = await database;
 
-    await db.delete('tasks');
-    await db.delete('children');
-    await db.delete('rewards');
-    await db.delete('reward_history');
+    await db.transaction((txn) async {
+      await txn.delete('tasks');
+      await txn.delete('children');
+      await txn.delete('rewards');
+      await txn.delete('reward_history');
+      await txn.delete('routines');
+      await txn.delete('routine_generated');
+    });
   }
 
-  Future<void> generateDailyTasksIfNeeded(int childId) async {
-    final prefs = await SharedPreferences.getInstance();
+  Future<void> deleteTask(int taskId) async {
+    final db = await database;
+    await db.delete('tasks', where: 'id = ?', whereArgs: [taskId]);
+  }
+
+  // =========================
+  // ROUTINE METHODS
+  // =========================
+
+  Future<List<Map<String, dynamic>>> getRoutinesForChild(int childId) async {
+    final db = await database;
+    return await db.query(
+      'routines',
+      where: 'childId = ?',
+      whereArgs: [childId],
+      orderBy: 'id',
+    );
+  }
+
+  Future<int> insertRoutine(int childId, String title, int days) async {
+    final db = await database;
+    return await db.insert('routines', {
+      'childId': childId,
+      'title': title,
+      'days': days,
+    });
+  }
+
+  /// Changing a routine re-plans its unfinished future tasks; today's and
+  /// past tasks are kept.
+  Future<void> updateRoutine(int id, String title, int days) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.update(
+        'routines',
+        {'title': title, 'days': days},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await _removeFutureRoutineTasks(txn, id);
+    });
+  }
+
+  Future<void> deleteRoutine(int id) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await _removeFutureRoutineTasks(txn, id);
+      await txn.delete('routines', where: 'id = ?', whereArgs: [id]);
+      await txn.delete(
+        'routine_generated',
+        where: 'routineId = ?',
+        whereArgs: [id],
+      );
+    });
+  }
+
+  Future<void> _removeFutureRoutineTasks(Transaction txn, int routineId) async {
     final today = DateTime.now().toIso8601String().substring(0, 10);
-
-    final key = 'lastGenerated_$childId';
-    final lastGenerated = prefs.getString(key);
-
-    if (lastGenerated == today) return;
-
-    final db = await database;
-
-    // Get templates
-    final templates = await db.query(
-      'task_templates',
-      where: 'childId = ?',
-      whereArgs: [childId],
+    await txn.delete(
+      'tasks',
+      where: 'routineId = ? AND date > ? AND isCompleted = 0',
+      whereArgs: [routineId, today],
     );
-
-    for (var template in templates) {
-      // Ignore if the parent already added the same task today (UNIQUE key).
-      await db.insert('tasks', {
-        'childId': childId,
-        'title': template['title'],
-        'isCompleted': 0,
-        'starAwarded': 0,
-        'date': today,
-      }, conflictAlgorithm: ConflictAlgorithm.ignore);
-    }
-
-    await prefs.setString(key, today);
+    await txn.delete(
+      'routine_generated',
+      where: 'routineId = ? AND date > ?',
+      whereArgs: [routineId, today],
+    );
   }
 
-  Future<List<String>> getTaskTemplatesForChild(int childId) async {
+  /// Creates the tasks a child's routines schedule on [date]. Only runs for
+  /// today and later, so it never rewrites history. [maxTasks] applies the
+  /// free plan limit; routines that don't fit are created later if the
+  /// limit is lifted.
+  Future<void> generateRoutineTasks(
+    int childId,
+    DateTime date, {
+    int? maxTasks,
+  }) async {
+    final dateStr = date.toIso8601String().substring(0, 10);
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    if (dateStr.compareTo(today) < 0) return;
+
     final db = await database;
+    final routines = await getRoutinesForChild(childId);
 
-    final results = await db.query(
-      'task_templates',
-      where: 'childId = ?',
-      whereArgs: [childId],
-    );
+    await db.transaction((txn) async {
+      for (final routine in routines) {
+        if (!includesWeekday(routine['days'] as int, date.weekday)) continue;
 
-    return results.map((e) => e['title'] as String).toList();
-  }
+        final done = await txn.query(
+          'routine_generated',
+          where: 'routineId = ? AND date = ?',
+          whereArgs: [routine['id'], dateStr],
+        );
+        if (done.isNotEmpty) continue;
 
-  Future<List<String>> getTaskSuggestions(int childId) async {
-    final db = await database;
+        if (maxTasks != null) {
+          final count = Sqflite.firstIntValue(
+            await txn.rawQuery(
+              'SELECT COUNT(*) FROM tasks WHERE childId = ? AND date = ?',
+              [childId, dateStr],
+            ),
+          )!;
+          if (count >= maxTasks) continue;
+        }
 
-    final result = await db.query(
-      'task_templates',
-      where: 'childId = ?',
-      whereArgs: [childId],
-    );
-
-    return result.map((e) => e['title'] as String).toList();
+        await txn.insert('tasks', {
+          'childId': childId,
+          'title': routine['title'],
+          'isCompleted': 0,
+          'starAwarded': 0,
+          'date': dateStr,
+          'routineId': routine['id'],
+        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        await txn.insert('routine_generated', {
+          'routineId': routine['id'],
+          'date': dateStr,
+        });
+      }
+    });
   }
 
   // =========================
   // REWARDS METHODS
   // =========================
 
-  Future<void> insertReward(int childId, String title, int cost) async {
+  Future<void> insertReward(
+    int childId,
+    String title,
+    int cost, {
+    String? icon,
+  }) async {
     final db = await database;
 
     await db.insert('rewards', {
       'childId': childId,
       'title': title,
       'cost': cost,
+      'icon': icon,
+    });
+  }
+
+  Future<void> deleteReward(int id) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      // Redemptions from before v2 have no title/cost of their own; copy
+      // them in so the history keeps showing what was redeemed.
+      await txn.rawUpdate(
+        '''
+        UPDATE reward_history
+        SET title = (SELECT title FROM rewards WHERE id = ?),
+            cost = (SELECT cost FROM rewards WHERE id = ?)
+        WHERE rewardId = ? AND title IS NULL
+        ''',
+        [id, id, id],
+      );
+      await txn.delete('rewards', where: 'id = ?', whereArgs: [id]);
     });
   }
 
@@ -337,6 +471,13 @@ class DatabaseService {
     final db = await database;
 
     return db.transaction((txn) async {
+      final reward = await txn.query(
+        'rewards',
+        where: 'id = ?',
+        whereArgs: [rewardId],
+      );
+      if (reward.isEmpty) return false;
+
       // Only deducts if the child has enough stars.
       final updated = await txn.rawUpdate(
         'UPDATE children SET stars = stars - ? WHERE id = ? AND stars >= ?',
@@ -350,6 +491,8 @@ class DatabaseService {
         'childId': childId,
         'rewardId': rewardId,
         'date': DateTime.now().toIso8601String(),
+        'title': reward.first['title'],
+        'cost': cost,
       });
 
       return true;
@@ -361,9 +504,11 @@ class DatabaseService {
 
     return await db.rawQuery(
       '''
-    SELECT rh.id, rh.date, r.title, r.cost
+    SELECT rh.id, rh.date,
+           COALESCE(rh.title, r.title, 'Deleted reward') AS title,
+           COALESCE(rh.cost, r.cost, 0) AS cost
     FROM reward_history rh
-    JOIN rewards r ON rh.rewardId = r.id
+    LEFT JOIN rewards r ON rh.rewardId = r.id
     WHERE rh.childId = ?
     ORDER BY rh.date DESC
   ''',
@@ -376,19 +521,23 @@ class DatabaseService {
     await db.delete('reward_history', where: 'id = ?', whereArgs: [historyId]);
   }
 
-  Future<int> insertTemplate(String title) async {
+  // =========================
+  // REPORT METHODS
+  // =========================
+
+  /// Tasks for a child between two yyyy-mm-dd dates, inclusive.
+  Future<List<Map<String, dynamic>>> getTasksForChildBetween(
+    int childId,
+    String fromDate,
+    String toDate,
+  ) async {
     final db = await database;
 
-    return await db.insert('task_templates', {'title': title});
-  }
-
-  Future<List<Map<String, dynamic>>> getAllTemplates() async {
-    final db = await database;
-    return await db.query('task_templates');
-  }
-
-  Future<void> deleteTemplate(int id) async {
-    final db = await database;
-    await db.delete('task_templates', where: 'id = ?', whereArgs: [id]);
+    return await db.query(
+      'tasks',
+      where: 'childId = ? AND date >= ? AND date <= ?',
+      whereArgs: [childId, fromDate, toDate],
+      orderBy: 'date',
+    );
   }
 }
