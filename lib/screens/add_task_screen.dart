@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../data/local_db.dart';
+import '../services/database_service.dart';
 import '../services/limit_service.dart';
 
 class AddTaskScreen extends StatefulWidget {
@@ -13,21 +13,26 @@ class AddTaskScreen extends StatefulWidget {
 class _AddTaskScreenState extends State<AddTaskScreen> {
   final controller = TextEditingController();
 
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
   Future<void> _save() async {
+    final title = controller.text.trim();
+    if (title.isEmpty) return;
+
+    final today = DateTime.now().toIso8601String().substring(0, 10);
     final limits = LimitService(isPremium: false);
-    if (!await limits.canAddTask(widget.childId)) {
+    if (!await limits.canAddTask(widget.childId, today)) {
       // TODO: show PaywallTasksLimit
       return;
     }
 
-    final db = await LocalDB.db;
-    await db.insert('tasks', {
-      'childId': widget.childId,
-      'title': controller.text,
-      'completed': 0,
-      'date': DateTime.now().toIso8601String().substring(0, 10),
-    });
+    await DatabaseService().insertTask(widget.childId, title);
 
+    if (!mounted) return;
     Navigator.pop(context);
   }
 

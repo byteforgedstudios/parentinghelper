@@ -1,29 +1,23 @@
-import '../data/local_db.dart';
+import 'database_service.dart';
 import '../state/app_limits.dart';
 
 class LimitService {
   final bool isPremium;
+  final DatabaseService _db = DatabaseService();
 
   LimitService({required this.isPremium});
 
   Future<bool> canAddChild() async {
     if (isPremium) return true;
 
-    final db = await LocalDB.db;
-    final result =
-        await db.rawQuery('SELECT COUNT(*) as count FROM children');
-    return (result.first['count'] as int) < FREE_MAX_CHILDREN;
+    return await _db.countChildren() < FREE_MAX_CHILDREN;
   }
 
-  Future<bool> canAddTask(int childId) async {
+  // Free plan: up to FREE_MAX_TASKS_PER_CHILD tasks per child per day.
+  Future<bool> canAddTask(int childId, String date) async {
     if (isPremium) return true;
 
-    final db = await LocalDB.db;
-    final result = await db.rawQuery(
-      'SELECT COUNT(*) as count FROM tasks WHERE childId = ?',
-      [childId],
-    );
-
-    return (result.first['count'] as int) < FREE_MAX_TASKS_PER_CHILD;
+    return await _db.countTasksForChildOnDate(childId, date) <
+        FREE_MAX_TASKS_PER_CHILD;
   }
 }

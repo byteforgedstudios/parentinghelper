@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
+import '../services/limit_service.dart';
 
 class TaskChecklistScreen extends StatefulWidget {
   const TaskChecklistScreen({super.key});
@@ -10,9 +11,10 @@ class TaskChecklistScreen extends StatefulWidget {
 
 class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
   final DatabaseService _db = DatabaseService();
+  final LimitService _limits = LimitService(isPremium: false);
   List<Map<String, dynamic>> tasks = [];
   late Map<String, dynamic> child;
-  DateTime selectedDate = DateTime.now();
+  DateTime selectedDate = DateUtils.dateOnly(DateTime.now());
   final ScrollController _dayScrollController = ScrollController();
 
   String get formattedDate => selectedDate.toIso8601String().split('T').first;
@@ -55,6 +57,11 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
     return names[month];
   }
 
+  // Calendar-day arithmetic. Adding Duration(days: n) adds 24-hour blocks,
+  // which skips or repeats a day across a daylight-saving change.
+  DateTime _addDays(DateTime date, int days) =>
+      DateTime(date.year, date.month, date.day + days);
+
   String _weekdayShort(int weekday) {
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     return days[weekday - 1];
@@ -78,10 +85,12 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
   }
 
   Future<void> _loadTasks() async {
-    final formattedDate = selectedDate.toIso8601String().split('T').first;
+    final date = formattedDate;
 
-    final loadedTasks = await _db.getTasksForChild(child['id'], formattedDate);
+    final loadedTasks = await _db.getTasksForChild(child['id'], date);
 
+    // Ignore stale results if the user moved to another day meanwhile.
+    if (!mounted || date != formattedDate) return;
     setState(() {
       tasks = loadedTasks;
     });
@@ -91,6 +100,7 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
     TextEditingController controller = TextEditingController();
     final templates = await _db.getAllTemplates();
 
+    if (!mounted) return;
     await showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -131,9 +141,26 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
-              if (controller.text.trim().isEmpty) return;
+              final title = controller.text.trim();
+              if (title.isEmpty) return;
 
-              await _db.insertTask(child['id'], controller.text.trim());
+              // Save to the day being viewed, not always today.
+              final date = formattedDate;
+              if (!await _limits.canAddTask(child['id'], date)) {
+                if (!mounted) return;
+                Navigator.pop(context);
+                // TODO: show Paywall Screen 2 (Unlock Unlimited Tasks)
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      "The free plan allows 5 tasks per day. Upgrade to Premium for unlimited tasks.",
+                    ),
+                  ),
+                );
+                return;
+              }
+
+              await _db.insertTaskWithDate(child['id'], title, date);
 
               if (!mounted) return;
               Navigator.pop(context);
@@ -168,7 +195,7 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
 
               if (picked != null) {
                 setState(() {
-                  selectedDate = picked;
+                  selectedDate = DateUtils.dateOnly(picked);
                 });
                 await _loadTasks();
               }
@@ -213,27 +240,39 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
     if (picked == null) return;
 
     DateTime current = picked.start;
+    bool hitLimit = false;
 
     while (!current.isAfter(picked.end)) {
       final newDate = current.toIso8601String().split('T').first;
 
       for (var task in tasks) {
+        if (!await _limits.canAddTask(child['id'], newDate)) {
+          hitLimit = true;
+          break;
+        }
         await _db.insertTaskWithDate(child['id'], task['title'], newDate);
       }
 
-      current = current.add(const Duration(days: 1));
+      current = _addDays(current, 1);
     }
 
     if (!mounted) return;
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text("Tasks copied successfully")));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          hitLimit
+              ? "Some tasks were not copied: the free plan allows 5 tasks per day."
+              : "Tasks copied successfully",
+        ),
+      ),
+    );
+    await _loadTasks();
   }
 
   Future<void> _changeDay(int offset) async {
     setState(() {
-      selectedDate = selectedDate.add(Duration(days: offset));
+      selectedDate = _addDays(selectedDate, offset);
     });
     await _loadTasks();
   }
@@ -278,8 +317,7 @@ class _TaskChecklistScreenState extends State<TaskChecklistScreen> {
 
     List<DateTime> days = List.generate(
       14,
-      (index) =>
-          today.subtract(const Duration(days: 3)).add(Duration(days: index)),
+      (index) => _addDays(today, index - 3),
     );
 
     return Padding(

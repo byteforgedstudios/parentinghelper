@@ -12,11 +12,18 @@ class _AddChildScreenState extends State<AddChildScreen> {
   final TextEditingController _controller = TextEditingController();
   final DatabaseService _db = DatabaseService();
 
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
   void saveChild() async {
     if (_controller.text.trim().isEmpty) return;
 
     await _db.insertChild(_controller.text.trim());
 
+    if (!mounted) return;
     Navigator.pop(context); // go back to dashboard
   }
 

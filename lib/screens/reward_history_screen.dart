@@ -50,6 +50,7 @@ class _RewardHistoryScreenState extends State<RewardHistoryScreen> {
       spent += item['cost'] as int;
     }
 
+    if (!mounted) return;
     setState(() {
       history = filtered;
       totalSpent = spent;

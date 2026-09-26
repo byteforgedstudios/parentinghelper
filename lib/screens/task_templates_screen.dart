@@ -20,6 +20,7 @@ class _TaskTemplatesScreenState extends State<TaskTemplatesScreen> {
 
   Future<void> loadTemplates() async {
     final data = await _db.getAllTemplates();
+    if (!mounted) return;
     setState(() {
       templates = data;
     });

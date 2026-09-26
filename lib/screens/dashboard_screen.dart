@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
+import '../services/limit_service.dart';
 import '../widgets/child_progress_card.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -18,11 +19,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    initialize();
-  }
-
-  Future<void> initialize() async {
-    await _db.checkAndResetDaily();
     loadData();
   }
 
@@ -42,6 +38,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       stats[child['id']] = {"total": total, "completed": completed};
     }
 
+    if (!mounted) return;
     setState(() {
       children = kids;
       childStats = stats;
@@ -51,7 +48,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Parent Dashboard")),
+      appBar: AppBar(
+        title: const Text("Parent Dashboard"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.list_alt),
+            tooltip: "Task Templates",
+            onPressed: () => Navigator.pushNamed(context, '/taskTemplates'),
+          ),
+        ],
+      ),
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -59,6 +65,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
           FloatingActionButton(
             heroTag: "addChild",
             onPressed: () async {
+              final canAdd = await LimitService(isPremium: false).canAddChild();
+              if (!context.mounted) return;
+
+              if (!canAdd) {
+                // TODO: show Paywall Screen 1 (Add Another Child)
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      "The free plan allows 1 child. Upgrade to Premium to add more.",
+                    ),
+                  ),
+                );
+                return;
+              }
+
               await Navigator.pushNamed(context, '/addChild');
               await loadData();
             },

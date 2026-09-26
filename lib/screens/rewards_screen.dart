@@ -34,6 +34,7 @@ class _RewardsScreenState extends State<RewardsScreen> {
   Future<void> loadStars() async {
     final dbChild = await _db.getChildById(child['id']);
 
+    if (!mounted) return;
     setState(() {
       stars = dbChild['stars'] as int;
     });
@@ -63,6 +64,7 @@ class _RewardsScreenState extends State<RewardsScreen> {
 
   Future<void> loadRewards() async {
     final data = await _db.getRewardsForChild(child['id']);
+    if (!mounted) return;
     setState(() {
       rewards = data;
     });

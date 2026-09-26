@@ -93,8 +93,12 @@ class DatabaseService {
 
   Future<void> deleteChild(int id) async {
     final db = await database;
-    await db.delete('children', where: 'id = ?', whereArgs: [id]);
-    await db.delete('tasks', where: 'childId = ?', whereArgs: [id]);
+    await db.transaction((txn) async {
+      await txn.delete('children', where: 'id = ?', whereArgs: [id]);
+      await txn.delete('tasks', where: 'childId = ?', whereArgs: [id]);
+      await txn.delete('rewards', where: 'childId = ?', whereArgs: [id]);
+      await txn.delete('reward_history', where: 'childId = ?', whereArgs: [id]);
+    });
   }
 
   // =========================
@@ -165,15 +169,60 @@ class DatabaseService {
     );
   }
 
+  // Completing a task awards 1 star; un-ticking it takes that star back.
+  // starAwarded tracks whether the star is currently granted so toggling
+  // can't be used to farm stars.
   Future<void> updateTaskStatus(int taskId, bool completed) async {
     final db = await database;
 
-    await db.update(
-      'tasks',
-      {'isCompleted': completed ? 1 : 0},
-      where: 'id = ?',
-      whereArgs: [taskId],
+    await db.transaction((txn) async {
+      final rows = await txn.query(
+        'tasks',
+        where: 'id = ?',
+        whereArgs: [taskId],
+      );
+      if (rows.isEmpty) return;
+
+      final task = rows.first;
+      final childId = task['childId'] as int;
+      final starAwarded = task['starAwarded'] == 1;
+
+      await txn.update(
+        'tasks',
+        {'isCompleted': completed ? 1 : 0, 'starAwarded': completed ? 1 : 0},
+        where: 'id = ?',
+        whereArgs: [taskId],
+      );
+
+      if (completed && !starAwarded) {
+        await txn.rawUpdate(
+          'UPDATE children SET stars = stars + 1 WHERE id = ?',
+          [childId],
+        );
+      } else if (!completed && starAwarded) {
+        await txn.rawUpdate(
+          'UPDATE children SET stars = MAX(stars - 1, 0) WHERE id = ?',
+          [childId],
+        );
+      }
+    });
+  }
+
+  Future<int> countTasksForChildOnDate(int childId, String date) async {
+    final db = await database;
+
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) AS count FROM tasks WHERE childId = ? AND date = ?',
+      [childId, date],
     );
+
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  Future<int> countChildren() async {
+    final db = await database;
+    final result = await db.rawQuery('SELECT COUNT(*) AS count FROM children');
+    return Sqflite.firstIntValue(result) ?? 0;
   }
 
   Future<void> addStars(int childId, int starsToAdd) async {
@@ -185,25 +234,14 @@ class DatabaseService {
     ]);
   }
 
+  // Tasks are stored per date, so each day's checklist starts fresh without
+  // deleting anything. This only removes tasks from before today.
   Future<void> clearOldTasks() async {
     final db = await database;
 
     final today = DateTime.now().toIso8601String().substring(0, 10);
 
-    await db.delete('tasks', where: 'date != ?', whereArgs: [today]);
-  }
-
-  Future<void> dailyResetIfNeeded() async {
-    final db = await database;
-
-    final prefs = await SharedPreferences.getInstance();
-    final today = DateTime.now().toIso8601String().substring(0, 10);
-    final lastReset = prefs.getString('last_reset_date');
-
-    if (lastReset != today) {
-      await db.delete('tasks');
-      await prefs.setString('last_reset_date', today);
-    }
+    await db.delete('tasks', where: 'date < ?', whereArgs: [today]);
   }
 
   Future<void> clearDatabase() async {
@@ -213,23 +251,6 @@ class DatabaseService {
     await db.delete('children');
     await db.delete('rewards');
     await db.delete('reward_history');
-  }
-
-  Future<void> checkAndResetDaily() async {
-    final prefs = await SharedPreferences.getInstance();
-
-    final today = DateTime.now().toIso8601String().substring(0, 10);
-    final lastReset = prefs.getString('lastResetDate');
-
-    if (lastReset != today) {
-      final db = await database;
-
-      // Delete old tasks
-      await db.delete('tasks', where: 'date != ?', whereArgs: [today]);
-
-      // Save today's date
-      await prefs.setString('lastResetDate', today);
-    }
   }
 
   Future<void> generateDailyTasksIfNeeded(int childId) async {
@@ -251,13 +272,14 @@ class DatabaseService {
     );
 
     for (var template in templates) {
+      // Ignore if the parent already added the same task today (UNIQUE key).
       await db.insert('tasks', {
         'childId': childId,
         'title': template['title'],
         'isCompleted': 0,
         'starAwarded': 0,
         'date': today,
-      });
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
 
     await prefs.setString(key, today);
@@ -314,34 +336,24 @@ class DatabaseService {
   Future<bool> redeemReward(int childId, int rewardId, int cost) async {
     final db = await database;
 
-    final child = await db.query(
-      'children',
-      where: 'id = ?',
-      whereArgs: [childId],
-    );
+    return db.transaction((txn) async {
+      // Only deducts if the child has enough stars.
+      final updated = await txn.rawUpdate(
+        'UPDATE children SET stars = stars - ? WHERE id = ? AND stars >= ?',
+        [cost, childId, cost],
+      );
 
-    if (child.isEmpty) return false;
+      if (updated == 0) return false; // Not enough stars (or no such child)
 
-    int currentStars = child.first['stars'] as int;
+      // Log redemption
+      await txn.insert('reward_history', {
+        'childId': childId,
+        'rewardId': rewardId,
+        'date': DateTime.now().toIso8601String(),
+      });
 
-    if (currentStars < cost) {
-      return false; // Not enough stars
-    }
-
-    // Deduct stars
-    await db.rawUpdate('UPDATE children SET stars = stars - ? WHERE id = ?', [
-      cost,
-      childId,
-    ]);
-
-    // Log redemption
-    await db.insert('reward_history', {
-      'childId': childId,
-      'rewardId': rewardId,
-      'date': DateTime.now().toIso8601String(),
+      return true;
     });
-
-    return true;
   }
 
   Future<List<Map<String, dynamic>>> getRewardHistory(int childId) async {
