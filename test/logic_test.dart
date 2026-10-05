@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:parentinghelper/services/parental_gate.dart';
+import 'package:parentinghelper/services/premium_service.dart';
 import 'package:parentinghelper/services/subscription_offers.dart';
 import 'package:parentinghelper/state/app_limits.dart';
 import 'package:parentinghelper/state/routine_days.dart';
@@ -88,6 +89,18 @@ void main() {
       expect(hashPin('1234', 'salt-a'), h);
       expect(hashPin('1235', 'salt-a'), isNot(h));
       expect(hashPin('1234', 'salt-b'), isNot(h));
+    });
+  });
+
+  group('access code', () {
+    test('hash ignores case, spaces and hyphens', () {
+      expect(accessCodeHash('ph-abcd-efgh'), accessCodeHash('PH ABCD EFGH'));
+      expect(accessCodeHash('PHABCDEFGH'), accessCodeHash('ph-abcd-efgh'));
+    });
+
+    test('a wrong code does not match the shipped hash', () {
+      expect(accessCodeHash('PH-AAAA-BBBB-CCCC'), isNot(kAccessCodeHash));
+      expect(accessCodeHash(''), isNot(kAccessCodeHash));
     });
   });
 }

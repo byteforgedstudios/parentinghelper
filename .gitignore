@@ -44,3 +44,6 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 /android/build/
+
+# Reviewer access code (secret)
+reviewer_access_code.txt

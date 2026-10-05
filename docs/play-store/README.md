@@ -40,7 +40,7 @@ Recommended: turn on a **grace period** (e.g. 7 days) and **account hold**, so a
 2. Build and upload an app bundle to the **Internal testing** track (see section 7), then install it from the Play testing link. Purchases only work in builds installed from Play.
 3. Test purchases renew quickly (a "year" lasts about 30 minutes) and are never charged.
 
-The debug-only **Settings → Developer → Simulate Premium** switch tests Premium features without Play. It never appears in release builds.
+There is no way to unlock Premium without a real subscription; test Premium with a licence-tester account on the internal track.
 
 ## 4. Data safety form [Console]
 
@@ -62,7 +62,7 @@ Before submitting, check the **Google Play Billing Library** entry in the [Googl
 - **Appeals to children:** the design is playful, so Google may ask whether the app unintentionally appeals to children. Answer honestly. The parental PIN on purchases, rewards and settings plus the adult-only onboarding support the 18+ declaration. If Google classifies it as appealing to children, the Families Policy applies. The app already meets its main points: no ads, no data collection, and purchases behind a parental gate.
 - **Content rating (IARC):** answer No to violence, sexuality, language, drugs, gambling, user interaction and location sharing. Expected rating: Everyone / PEGI 3.
 - **Ads:** No ads.
-- **App access:** all features are available without special access; no account is needed. Reviewers create their own parent PIN during onboarding.
+- **Sign-in details (App access):** answer **Yes** (subscriptions count as restricted content). No account is needed; reviewers create their own parent PIN during onboarding. Reviewers can't buy subscriptions or use free trials, so give them the **reviewer access code** (Settings → Have an access code?), which unlocks Premium on one device for 30 days. The code is in the git-ignored `reviewer_access_code.txt`; only its hash (`kAccessCodeHash` in `lib/services/premium_service.dart`) is in the app. To rotate it, generate a new code, replace the hash, ship an update and update Sign-in details.
 - **Financial features, health, news, government:** None.
 
 ## 6. Store listing [Console]

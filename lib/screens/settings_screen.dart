@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -33,8 +32,11 @@ class SettingsScreen extends StatelessWidget {
               ),
               title: Text(premium.isPremium ? 'Premium active' : 'Go Premium'),
               subtitle: Text(
-                premium.isPremium
+                premium.hasSubscription
                     ? 'Unlimited children, tasks, rewards and reports'
+                    : premium.accessCodeActive
+                    ? 'Access code active until '
+                          '${_formatDate(premium.accessCodeUntil!)}'
                     : 'Unlimited children, tasks & rewards, reports and more',
               ),
               trailing: const Icon(Icons.chevron_right),
@@ -61,7 +63,13 @@ class SettingsScreen extends StatelessWidget {
                 );
               },
             ),
-            if (premium.isPremium)
+            if (!premium.hasSubscription)
+              ListTile(
+                leading: const Icon(Icons.key_outlined),
+                title: const Text('Have an access code?'),
+                onTap: () => _enterAccessCode(context),
+              ),
+            if (premium.hasSubscription)
               ListTile(
                 leading: const Icon(Icons.subscriptions_outlined),
                 title: const Text('Manage subscription'),
@@ -136,20 +144,39 @@ class SettingsScreen extends StatelessWidget {
               subtitle: Text('by $kStudioName'),
             ),
 
-            if (kDebugMode) ...[
-              const _Header('Developer (debug builds only)'),
-              SwitchListTile(
-                secondary: const Icon(Icons.bug_report, color: Colors.orange),
-                title: const Text('Simulate Premium'),
-                subtitle: const Text(
-                  'Test Premium before subscriptions exist in Play Console',
-                ),
-                value: premium.debugSimulatePremium,
-                onChanged: premium.setDebugSimulatePremium,
-              ),
-            ],
             const SizedBox(height: 24),
           ],
+        ),
+      ),
+    );
+  }
+
+  static String _formatDate(DateTime d) => '${d.day}/${d.month}/${d.year}';
+
+  Future<void> _enterAccessCode(BuildContext context) async {
+    if (!await ParentalGate.instance.requireParent(
+          context,
+          reason: 'Enter your PIN to use an access code.',
+        ) ||
+        !context.mounted) {
+      return;
+    }
+
+    final code = await showDialog<String>(
+      context: context,
+      builder: (_) => const _AccessCodeDialog(),
+    );
+    if (code == null || code.trim().isEmpty || !context.mounted) return;
+
+    final premium = PremiumService.instance;
+    final ok = await premium.redeemAccessCode(code);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Premium unlocked until ${_formatDate(premium.accessCodeUntil!)}.'
+              : "That access code isn't valid.",
         ),
       ),
     );
@@ -222,6 +249,48 @@ class _Header extends StatelessWidget {
           fontWeight: FontWeight.bold,
         ),
       ),
+    );
+  }
+}
+
+/// Asks for an access code. Owns its controller so it's disposed only after
+/// the dialog has fully closed.
+class _AccessCodeDialog extends StatefulWidget {
+  const _AccessCodeDialog();
+
+  @override
+  State<_AccessCodeDialog> createState() => _AccessCodeDialogState();
+}
+
+class _AccessCodeDialogState extends State<_AccessCodeDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Access code'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        textCapitalization: TextCapitalization.characters,
+        decoration: const InputDecoration(hintText: 'PH-XXXX-XXXX-XXXX'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context, _controller.text),
+          child: const Text('Redeem'),
+        ),
+      ],
     );
   }
 }

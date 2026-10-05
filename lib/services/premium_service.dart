@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
@@ -15,6 +18,23 @@ const String kPremiumMonthlyId = 'premium_monthly';
 const String kPremiumYearlyId = 'premium_yearly';
 const Set<String> kPremiumProductIds = {kPremiumMonthlyId, kPremiumYearlyId};
 
+// Access code for Google Play reviewers and testers (they can't buy
+// subscriptions or use free trials). Only the SHA-256 hash of the code is
+// in the app; the code itself is kept outside git. To rotate it, generate a
+// new code, replace this hash and ship an update.
+const String kAccessCodeHash =
+    'c4ec79e4015f40691d8948d991dfb344338bf8ac207c5cce75ab7d9259d94eb6';
+const Duration kAccessCodeDuration = Duration(days: 30);
+
+/// Hash of an access code, ignoring case, spaces and hyphens.
+@visibleForTesting
+String accessCodeHash(String code) {
+  final normalised = code.toUpperCase().replaceAll(RegExp(r'[\s-]'), '');
+  return sha256
+      .convert(utf8.encode('parentinghelper-access:$normalised'))
+      .toString();
+}
+
 // Shown until the store returns localised prices.
 const String kFallbackMonthlyPrice = '\$2.99';
 const String kFallbackYearlyPrice = '\$19.99';
@@ -29,10 +49,10 @@ class PremiumService extends ChangeNotifier {
   static final PremiumService instance = PremiumService._();
 
   static const _premiumKey = 'is_premium';
-  static const _debugPremiumKey = 'debug_simulate_premium';
+  static const _accessUntilKey = 'access_code_until';
 
   bool _hasSubscription = false;
-  bool _debugSimulatePremium = false;
+  DateTime? _accessCodeUntil;
   bool storeAvailable = false;
   bool purchasePending = false;
   String? lastError;
@@ -40,8 +60,25 @@ class PremiumService extends ChangeNotifier {
 
   StreamSubscription<List<PurchaseDetails>>? _purchaseSub;
 
-  bool get isPremium => _hasSubscription || _debugSimulatePremium;
-  bool get debugSimulatePremium => _debugSimulatePremium;
+  /// Premium comes from an active Google Play subscription, or from a
+  /// reviewer/tester access code that hasn't expired.
+  bool get isPremium => _hasSubscription || accessCodeActive;
+
+  bool get hasSubscription => _hasSubscription;
+  DateTime? get accessCodeUntil => accessCodeActive ? _accessCodeUntil : null;
+  bool get accessCodeActive =>
+      _accessCodeUntil != null && DateTime.now().isBefore(_accessCodeUntil!);
+
+  /// Unlocks Premium on this device for [kAccessCodeDuration] if [code]
+  /// matches. Returns whether it did.
+  Future<bool> redeemAccessCode(String code) async {
+    if (accessCodeHash(code) != kAccessCodeHash) return false;
+    _accessCodeUntil = DateTime.now().add(kAccessCodeDuration);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_accessUntilKey, _accessCodeUntil!.toIso8601String());
+    notifyListeners();
+    return true;
+  }
 
   String get monthlyPrice =>
       plans[kPremiumMonthlyId]?.recurringPrice ?? kFallbackMonthlyPrice;
@@ -67,8 +104,9 @@ class PremiumService extends ChangeNotifier {
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     _hasSubscription = prefs.getBool(_premiumKey) ?? false;
-    _debugSimulatePremium =
-        kDebugMode && (prefs.getBool(_debugPremiumKey) ?? false);
+    _accessCodeUntil = DateTime.tryParse(
+      prefs.getString(_accessUntilKey) ?? '',
+    );
     notifyListeners();
 
     try {
@@ -225,16 +263,6 @@ class PremiumService extends ChangeNotifier {
     _hasSubscription = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_premiumKey, value);
-    notifyListeners();
-  }
-
-  /// Debug builds only: lets developers test Premium features before the
-  /// subscriptions exist in Play Console.
-  Future<void> setDebugSimulatePremium(bool value) async {
-    if (!kDebugMode) return;
-    _debugSimulatePremium = value;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_debugPremiumKey, value);
     notifyListeners();
   }
 
